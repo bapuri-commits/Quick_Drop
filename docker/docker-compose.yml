@@ -1,0 +1,15 @@
+services:
+  quickdrop:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8200:8200"
+    volumes:
+      - quickdrop-data:/app/uploads
+    env_file:
+      - ../.env
+    restart: unless-stopped
+
+volumes:
+  quickdrop-data:

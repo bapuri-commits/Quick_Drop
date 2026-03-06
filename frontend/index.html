@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QuickDrop</title>
+<style>
+:root {
+  --bg: #f5f5f5; --surface: #ffffff; --text: #1a1a1a; --text2: #666;
+  --accent: #2563eb; --accent-hover: #1d4ed8; --danger: #dc2626;
+  --border: #e2e2e2; --drop-bg: #eff6ff; --drop-border: #93c5fd;
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  --radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f0f0f; --surface: #1a1a1a; --text: #e5e5e5; --text2: #999;
+    --accent: #3b82f6; --accent-hover: #60a5fa; --danger: #ef4444;
+    --border: #2a2a2a; --drop-bg: #1e293b; --drop-border: #3b82f6;
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg); color: var(--text);
+  min-height: 100dvh; display: flex; flex-direction: column; align-items: center;
+}
+.container { width: 100%; max-width: 640px; padding: 20px; }
+
+/* ── Login ── */
+#login-view { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80dvh; }
+#login-view h1 { font-size: 2rem; margin-bottom: 8px; }
+#login-view p { color: var(--text2); margin-bottom: 32px; }
+#login-form { display: flex; gap: 8px; width: 100%; max-width: 360px; }
+#login-form input {
+  flex: 1; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); font-size: 16px; outline: none;
+}
+#login-form input:focus { border-color: var(--accent); }
+#login-error { color: var(--danger); margin-top: 12px; font-size: 14px; display: none; }
+
+/* ── Main ── */
+#main-view { display: none; }
+header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+header h1 { font-size: 1.5rem; }
+header button { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 14px; }
+header button:hover { color: var(--danger); }
+
+/* ── Drop zone ── */
+.dropzone {
+  border: 2px dashed var(--border); border-radius: var(--radius); padding: 40px 20px;
+  text-align: center; cursor: pointer; transition: all 0.2s;
+  background: var(--surface); margin-bottom: 20px;
+}
+.dropzone.dragover { border-color: var(--drop-border); background: var(--drop-bg); }
+.dropzone-icon { font-size: 2.5rem; margin-bottom: 8px; }
+.dropzone-text { color: var(--text2); font-size: 14px; }
+.dropzone-btn {
+  display: inline-block; margin-top: 12px; padding: 10px 24px;
+  background: var(--accent); color: #fff; border: none; border-radius: 8px;
+  font-size: 14px; cursor: pointer; font-weight: 500;
+}
+.dropzone-btn:hover { background: var(--accent-hover); }
+
+/* ── Expire selector ── */
+.expire-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px; font-size: 14px; color: var(--text2);
+}
+.expire-row select {
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text); font-size: 14px;
+}
+
+/* ── Progress ── */
+#upload-progress { display: none; margin-bottom: 16px; }
+.progress-bar {
+  height: 6px; background: var(--border); border-radius: 3px; overflow: hidden;
+}
+.progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.3s; }
+.progress-text { font-size: 12px; color: var(--text2); margin-top: 4px; text-align: center; }
+
+/* ── File list ── */
+.file-card {
+  background: var(--surface); border-radius: var(--radius); padding: 14px 16px;
+  margin-bottom: 8px; display: flex; align-items: center; gap: 12px;
+  box-shadow: var(--card-shadow);
+}
+.file-icon { font-size: 1.5rem; flex-shrink: 0; }
+.file-info { flex: 1; min-width: 0; }
+.file-name { font-weight: 500; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-meta { font-size: 12px; color: var(--text2); margin-top: 2px; }
+.file-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.file-actions button {
+  width: 36px; height: 36px; border: none; border-radius: 8px;
+  cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;
+}
+.btn-dl { background: var(--accent); color: #fff; }
+.btn-dl:hover { background: var(--accent-hover); }
+.btn-del { background: var(--surface); border: 1px solid var(--border) !important; color: var(--danger); }
+.btn-del:hover { background: var(--danger); color: #fff; }
+
+/* ── Footer ── */
+.footer {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border);
+  font-size: 13px; color: var(--text2);
+}
+.footer button {
+  background: none; border: none; color: var(--danger); cursor: pointer; font-size: 13px;
+}
+.footer button:hover { text-decoration: underline; }
+
+#empty-state { text-align: center; padding: 60px 0; color: var(--text2); }
+#empty-state .empty-icon { font-size: 3rem; margin-bottom: 8px; }
+
+.btn-primary {
+  padding: 14px 24px; background: var(--accent); color: #fff; border: none;
+  border-radius: var(--radius); font-size: 16px; cursor: pointer; font-weight: 500;
+}
+.btn-primary:hover { background: var(--accent-hover); }
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-view" class="container">
+  <h1>QuickDrop</h1>
+  <p>개인 파일 클라우드</p>
+  <form id="login-form" onsubmit="return doLogin(event)">
+    <input type="password" id="pw-input" placeholder="비밀번호" autocomplete="current-password">
+    <button type="submit" class="btn-primary">로그인</button>
+  </form>
+  <div id="login-error">비밀번호가 틀렸습니다</div>
+</div>
+
+<!-- Main -->
+<div id="main-view" class="container">
+  <header>
+    <h1>QuickDrop</h1>
+    <button onclick="logout()">로그아웃</button>
+  </header>
+
+  <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
+    <div class="dropzone-icon">&#9729;</div>
+    <div class="dropzone-text">파일을 여기에 드래그하거나</div>
+    <button type="button" class="dropzone-btn">파일 선택</button>
+    <input type="file" id="file-input" multiple hidden>
+  </div>
+
+  <div class="expire-row">
+    <span>자동 삭제</span>
+    <select id="expire-select">
+      <option value="1">1일</option>
+      <option value="3">3일</option>
+      <option value="7" selected>7일</option>
+      <option value="14">14일</option>
+      <option value="30">30일</option>
+    </select>
+  </div>
+
+  <div id="upload-progress">
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="progress-text" id="progress-text">업로드 중...</div>
+  </div>
+
+  <div id="file-list"></div>
+  <div id="empty-state" style="display:none;">
+    <div class="empty-icon">&#128193;</div>
+    <div>파일이 없습니다</div>
+  </div>
+
+  <div class="footer">
+    <span id="storage-info">0 B 사용 중</span>
+    <button onclick="deleteAll()">전체 삭제</button>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+  return (bytes / 1073741824).toFixed(2) + ' GB';
+}
+
+function fileIcon(name) {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  const map = {
+    pdf: '📄', doc: '📝', docx: '📝', txt: '📝', md: '📝',
+    png: '🖼️', jpg: '🖼️', jpeg: '🖼️', gif: '🖼️', webp: '🖼️', svg: '🖼️',
+    mp4: '🎬', mov: '🎬', avi: '🎬', mkv: '🎬', webm: '🎬',
+    mp3: '🎵', wav: '🎵', flac: '🎵',
+    zip: '📦', rar: '📦', '7z': '📦', tar: '📦', gz: '📦',
+    py: '💻', js: '💻', java: '💻', cpp: '💻', ts: '💻',
+    xlsx: '📊', xls: '📊', csv: '📊',
+    pptx: '📑', ppt: '📑',
+  };
+  return map[ext] || '📎';
+}
+
+function timeRemaining(hours) {
+  if (hours < 1) return Math.round(hours * 60) + '분 남음';
+  if (hours < 24) return Math.round(hours) + '시간 남음';
+  return Math.round(hours / 24) + '일 남음';
+}
+
+async function checkAuth() {
+  try {
+    const r = await fetch(API + '/api/auth/check', { credentials: 'include' });
+    if (r.ok) { showMain(); return; }
+  } catch {}
+  showLogin();
+}
+
+function showLogin() {
+  document.getElementById('login-view').style.display = 'flex';
+  document.getElementById('main-view').style.display = 'none';
+}
+
+function showMain() {
+  document.getElementById('login-view').style.display = 'none';
+  document.getElementById('main-view').style.display = 'block';
+  loadFiles();
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  const pw = document.getElementById('pw-input').value;
+  const form = new FormData();
+  form.append('password', pw);
+  try {
+    const r = await fetch(API + '/api/auth', { method: 'POST', body: form, credentials: 'include' });
+    if (r.ok) {
+      const data = await r.json();
+      localStorage.setItem('quickdrop_token', data.token);
+      showMain();
+    } else {
+      document.getElementById('login-error').style.display = 'block';
+    }
+  } catch {
+    document.getElementById('login-error').style.display = 'block';
+  }
+}
+
+function logout() {
+  document.cookie = 'session=; Max-Age=0; path=/';
+  localStorage.removeItem('quickdrop_token');
+  showLogin();
+}
+
+async function loadFiles() {
+  try {
+    const r = await fetch(API + '/api/files', { credentials: 'include' });
+    if (!r.ok) { if (r.status === 401) showLogin(); return; }
+    const data = await r.json();
+    renderFiles(data.files, data.storage_used);
+  } catch {}
+}
+
+function renderFiles(files, storageUsed) {
+  const list = document.getElementById('file-list');
+  const empty = document.getElementById('empty-state');
+  document.getElementById('storage-info').textContent = formatSize(storageUsed) + ' 사용 중';
+
+  if (!files.length) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  list.innerHTML = files.map(f => `
+    <div class="file-card">
+      <div class="file-icon">${fileIcon(f.name)}</div>
+      <div class="file-info">
+        <div class="file-name" title="${f.name}">${f.name}</div>
+        <div class="file-meta">${formatSize(f.size)} · ${timeRemaining(f.remaining_hours)}</div>
+      </div>
+      <div class="file-actions">
+        <button class="btn-dl" onclick="dlFile('${f.id}','${f.name.replace(/'/g, "\\'")}')" title="다운로드">&#8595;</button>
+        <button class="btn-del" onclick="delFile('${f.id}')" title="삭제">&#10005;</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function dlFile(id, name) {
+  const a = document.createElement('a');
+  a.href = API + '/api/files/' + id + '/download';
+  a.download = name;
+  a.click();
+}
+
+async function delFile(id) {
+  await fetch(API + '/api/files/' + id, { method: 'DELETE', credentials: 'include' });
+  loadFiles();
+}
+
+async function deleteAll() {
+  if (!confirm('모든 파일을 삭제할까요?')) return;
+  await fetch(API + '/api/files', { method: 'DELETE', credentials: 'include' });
+  loadFiles();
+}
+
+async function uploadFiles(fileList) {
+  if (!fileList.length) return;
+  const form = new FormData();
+  for (const f of fileList) form.append('files', f);
+  form.append('expire_days', document.getElementById('expire-select').value);
+
+  const prog = document.getElementById('upload-progress');
+  const fill = document.getElementById('progress-fill');
+  const text = document.getElementById('progress-text');
+  prog.style.display = 'block';
+  fill.style.width = '0%';
+  text.textContent = '업로드 중...';
+
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', API + '/api/files');
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        const pct = Math.round(e.loaded / e.total * 100);
+        fill.style.width = pct + '%';
+        text.textContent = pct + '% (' + formatSize(e.loaded) + ' / ' + formatSize(e.total) + ')';
+      }
+    };
+    xhr.onload = () => {
+      fill.style.width = '100%';
+      text.textContent = '완료!';
+      setTimeout(() => { prog.style.display = 'none'; }, 1500);
+      loadFiles();
+    };
+    xhr.onerror = () => {
+      text.textContent = '업로드 실패';
+      setTimeout(() => { prog.style.display = 'none'; }, 3000);
+    };
+    xhr.send(form);
+  } catch {
+    text.textContent = '업로드 실패';
+  }
+}
+
+// Drag & drop
+const dz = document.getElementById('dropzone');
+dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+dz.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dz.classList.remove('dragover');
+  uploadFiles(e.dataTransfer.files);
+});
+document.getElementById('file-input').addEventListener('change', (e) => {
+  uploadFiles(e.target.files);
+  e.target.value = '';
+});
+
+checkAuth();
+</script>
+</body>
+</html>

@@ -138,11 +138,12 @@ video.file-preview { object-fit: cover; }
 .vault-toolbar {
   display: flex; gap: 8px; margin-bottom: 12px;
 }
-.vault-toolbar button {
+.vault-toolbar button, .vault-upload-label {
   padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer;
+  display: inline-block;
 }
-.vault-toolbar button:hover { border-color: var(--vault-accent); color: var(--vault-accent); }
+.vault-toolbar button:hover, .vault-upload-label:hover { border-color: var(--vault-accent); color: var(--vault-accent); }
 
 .folder-card {
   background: var(--surface); border-radius: var(--radius); padding: 12px 14px;
@@ -202,12 +203,12 @@ video.file-preview { object-fit: cover; }
 
   <!-- ═══ DROP TAB ═══ -->
   <div id="drop-panel">
-    <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
+    <div class="dropzone" id="dropzone">
       <div class="dropzone-icon">&#9729;</div>
       <div class="dropzone-text">파일을 여기에 드래그하거나</div>
       <div class="dropzone-row">
-        <button type="button" class="dropzone-btn" onclick="event.stopPropagation();">파일 선택</button>
-        <div class="expire-inline" onclick="event.stopPropagation();">
+        <label class="dropzone-btn" for="file-input">파일 선택</label>
+        <div class="expire-inline">
           <span>만료</span>
           <select id="expire-select">
             <option value="1">1일</option>
@@ -218,7 +219,7 @@ video.file-preview { object-fit: cover; }
           </select>
         </div>
       </div>
-      <input type="file" id="file-input" multiple hidden>
+      <input type="file" id="file-input" multiple hidden accept="*/*">
     </div>
 
     <div id="upload-progress">
@@ -247,9 +248,9 @@ video.file-preview { object-fit: cover; }
     <div class="vault-breadcrumb" id="vault-breadcrumb"></div>
 
     <div class="vault-toolbar">
-      <button onclick="document.getElementById('vault-file-input').click()">파일 업로드</button>
+      <label class="vault-upload-label" for="vault-file-input">파일 업로드</label>
       <button onclick="vaultMkdir()">새 폴더</button>
-      <input type="file" id="vault-file-input" multiple hidden>
+      <input type="file" id="vault-file-input" multiple hidden accept="*/*">
     </div>
 
     <div id="vault-upload-progress">

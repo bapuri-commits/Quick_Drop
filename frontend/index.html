@@ -192,7 +192,10 @@ video.file-preview { object-fit: cover; }
 <div id="main-view" class="container">
   <header>
     <h1>QuickDrop</h1>
-    <button onclick="logout()">로그아웃</button>
+    <div style="display:flex;gap:12px;align-items:center;">
+      <button onclick="refreshCurrent()" title="새로고침">&#8635;</button>
+      <button onclick="logout()">로그아웃</button>
+    </div>
   </header>
 
   <!-- Tabs -->
@@ -311,10 +314,23 @@ function fileIcon(name) {
 function isImage(name) { return IMAGE_EXTS.has(getExt(name)); }
 function isVideo(name) { return VIDEO_EXTS.has(getExt(name)); }
 
+function authUrl(url) {
+  const t = localStorage.getItem('quickdrop_token');
+  if (!t) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'token=' + t;
+}
+
 function previewHtml(name, url) {
-  if (isImage(name)) return `<img class="file-preview" src="${url}" alt="" loading="lazy">`;
-  if (isVideo(name)) return `<video class="file-preview" src="${url}" muted preload="metadata"></video>`;
+  const aurl = authUrl(url);
+  if (isImage(name)) return `<img class="file-preview" src="${aurl}" alt="" loading="lazy">`;
+  if (isVideo(name)) return `<video class="file-preview" src="${aurl}" muted preload="metadata"></video>`;
   return `<div class="file-icon">${fileIcon(name)}</div>`;
+}
+
+function refreshCurrent() {
+  const isVault = !document.getElementById('vault-panel').classList.contains('hidden');
+  if (isVault) loadVault(_vaultPath);
+  else loadFiles();
 }
 
 function timeRemaining(hours) {
@@ -458,6 +474,7 @@ async function uploadFiles(fileList) {
   const xhr = new XMLHttpRequest();
   xhr.open('POST', API + '/api/files');
   xhr.withCredentials = true;
+  xhr.timeout = 600000;
   xhr.upload.onprogress = (e) => {
     if (e.lengthComputable) {
       const pct = Math.round(e.loaded / e.total * 100);
@@ -466,14 +483,26 @@ async function uploadFiles(fileList) {
     }
   };
   xhr.onload = () => {
-    fill.style.width = '100%';
-    text.textContent = '\uC644\uB8CC!';
-    setTimeout(() => { prog.style.display = 'none'; }, 1500);
+    if (xhr.status === 200) {
+      fill.style.width = '100%';
+      text.textContent = '\uC644\uB8CC!';
+      setTimeout(() => { prog.style.display = 'none'; }, 1500);
+    } else if (xhr.status === 401) {
+      text.textContent = '\uC778\uC99D \uB9CC\uB8CC — \uB2E4\uC2DC \uB85C\uADF8\uC778\uD558\uC138\uC694';
+      setTimeout(() => { prog.style.display = 'none'; showLogin(); }, 2000);
+    } else {
+      text.textContent = '\uC5C5\uB85C\uB4DC \uC2E4\uD328 (' + xhr.status + ')';
+      setTimeout(() => { prog.style.display = 'none'; }, 3000);
+    }
     loadFiles();
   };
   xhr.onerror = () => {
-    text.textContent = '\uC5C5\uB85C\uB4DC \uC2E4\uD328';
-    setTimeout(() => { prog.style.display = 'none'; }, 3000);
+    text.textContent = '\uC5F0\uACB0 \uC2E4\uD328 — \uB124\uD2B8\uC6CC\uD06C\uB97C \uD655\uC778\uD558\uC138\uC694';
+    setTimeout(() => { prog.style.display = 'none'; }, 4000);
+  };
+  xhr.ontimeout = () => {
+    text.textContent = '\uC5C5\uB85C\uB4DC \uC2DC\uAC04 \uCD08\uACFC — \uD30C\uC77C\uC774 \uB108\uBB34 \uD07D\uB2C8\uB2E4';
+    setTimeout(() => { prog.style.display = 'none'; }, 4000);
   };
   xhr.send(form);
 }
@@ -623,13 +652,26 @@ document.getElementById('vault-file-input').addEventListener('change', async (e)
       text.textContent = pct + '%';
     }
   };
+  xhr.timeout = 600000;
   xhr.onload = () => {
-    fill.style.width = '100%';
-    text.textContent = '\uC644\uB8CC!';
-    setTimeout(() => { prog.style.display = 'none'; }, 1500);
+    if (xhr.status === 200) {
+      fill.style.width = '100%';
+      text.textContent = '\uC644\uB8CC!';
+      setTimeout(() => { prog.style.display = 'none'; }, 1500);
+    } else {
+      text.textContent = '\uC5C5\uB85C\uB4DC \uC2E4\uD328 (' + xhr.status + ')';
+      setTimeout(() => { prog.style.display = 'none'; }, 3000);
+    }
     loadVault(_vaultPath);
   };
-  xhr.onerror = () => { text.textContent = '\uC2E4\uD328'; };
+  xhr.onerror = () => {
+    text.textContent = '\uC5F0\uACB0 \uC2E4\uD328 — \uB124\uD2B8\uC6CC\uD06C \uD655\uC778';
+    setTimeout(() => { prog.style.display = 'none'; }, 4000);
+  };
+  xhr.ontimeout = () => {
+    text.textContent = '\uC2DC\uAC04 \uCD08\uACFC';
+    setTimeout(() => { prog.style.display = 'none'; }, 4000);
+  };
   xhr.send(form);
   e.target.value = '';
 });

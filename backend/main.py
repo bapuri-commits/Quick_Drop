@@ -42,11 +42,12 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()[:16]
 
 
-def _require_auth(session: str | None):
-    if not session or session not in _valid_tokens:
+def _require_auth(session: str | None, token: str | None = None):
+    effective = session or token
+    if not effective or effective not in _valid_tokens:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    if time.time() - _valid_tokens[session] > TOKEN_LIFETIME:
-        _valid_tokens.pop(session, None)
+    if time.time() - _valid_tokens[effective] > TOKEN_LIFETIME:
+        _valid_tokens.pop(effective, None)
         raise HTTPException(status_code=401, detail="Session expired")
 
 
@@ -169,8 +170,8 @@ async def upload_files(
 
 
 @app.get("/api/files/{file_id}/download")
-async def download_file(file_id: str, session: str | None = Cookie(default=None)):
-    _require_auth(session)
+async def download_file(file_id: str, token: str | None = None, session: str | None = Cookie(default=None)):
+    _require_auth(session, token)
     meta = _read_meta(file_id)
     if not meta:
         raise HTTPException(status_code=404, detail="File not found")
@@ -281,8 +282,8 @@ async def vault_upload(
 
 
 @app.get("/api/vault/download")
-async def vault_download(path: str, session: str | None = Cookie(default=None)):
-    _require_auth(session)
+async def vault_download(path: str, token: str | None = None, session: str | None = Cookie(default=None)):
+    _require_auth(session, token)
     target = _safe_vault_path(path)
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="File not found")

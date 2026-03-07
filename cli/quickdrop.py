@@ -17,7 +17,7 @@ CONFIG_PATH = Path.home() / ".quickdrop.json"
 
 def load_config():
     if CONFIG_PATH.exists():
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        return json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
     return {}
 
 
@@ -219,6 +219,107 @@ def cmd_delete(args):
     print(f"  삭제 완료: {match['name']}")
 
 
+# ── Vault commands ────────────────────────────────────
+
+def _require_cfg():
+    cfg = load_config()
+    if "server" not in cfg:
+        print("먼저 quickdrop login <서버주소> 를 실행하세요.")
+        sys.exit(1)
+    return cfg
+
+
+def cmd_vault(args):
+    vault_action = args.vault_command
+    if not vault_action:
+        print("사용법: quickdrop vault {list|upload|download|delete|mkdir}")
+        return
+
+    {"list": cmd_vault_list, "upload": cmd_vault_upload,
+     "download": cmd_vault_download, "delete": cmd_vault_delete,
+     "mkdir": cmd_vault_mkdir}[vault_action](args)
+
+
+def cmd_vault_list(args):
+    cfg = _require_cfg()
+    path = args.path or "/"
+    from urllib.parse import quote
+    data = api(cfg, "GET", f"/api/vault?path={quote(path, safe='/')}")
+    items = data["items"]
+
+    print(f"\n  vault:{data['path']}")
+    print("─" * 60)
+    if not items:
+        print("  (비어 있음)")
+    else:
+        for item in items:
+            if item["type"] == "dir":
+                print(f"  [D] {item['name']}/")
+            else:
+                print(f"  [F] {item['name']:<32} {format_size(item['size']):>10}")
+    print(f"\n  vault 사용량: {format_size(data['storage_used'])}")
+
+
+def cmd_vault_upload(args):
+    cfg = _require_cfg()
+    dest = args.dest or "/"
+
+    file_data = []
+    for path_str in args.files:
+        p = Path(path_str)
+        if not p.exists():
+            print(f"파일 없음: {p}")
+            continue
+        file_data.append(("files", (p.name, p.read_bytes())))
+        print(f"  준비: {p.name} ({format_size(p.stat().st_size)})")
+
+    if not file_data:
+        print("업로드할 파일이 없습니다.")
+        return
+
+    body, ct = multipart_encode({"path": dest}, file_data)
+    result = api(cfg, "POST", "/api/vault", data=body, headers={"Content-Type": ct})
+
+    for item in result.get("uploaded", []):
+        if "error" in item:
+            print(f"  실패: {item['name']} — {item['error']}")
+        else:
+            print(f"  완료: {item['name']} → vault:{dest}/{item['name']} ({format_size(item['size'])})")
+
+
+def cmd_vault_download(args):
+    cfg = _require_cfg()
+    path = args.path
+    from urllib.parse import quote
+    resp = api(cfg, "GET", f"/api/vault/download?path={quote(path, safe='/')}", stream=True)
+
+    filename = path.rstrip("/").split("/")[-1]
+    out_path = Path(args.output) if args.output else Path(filename)
+    with open(out_path, "wb") as fp:
+        while True:
+            chunk = resp.read(8192)
+            if not chunk:
+                break
+            fp.write(chunk)
+    print(f"  다운로드 완료: {out_path} ({format_size(out_path.stat().st_size)})")
+
+
+def cmd_vault_delete(args):
+    cfg = _require_cfg()
+    path = args.path
+    from urllib.parse import quote
+    result = api(cfg, "DELETE", f"/api/vault?path={quote(path, safe='/')}")
+    print(f"  삭제 완료: vault:{path} ({result.get('deleted', 'unknown')})")
+
+
+def cmd_vault_mkdir(args):
+    cfg = _require_cfg()
+    path = args.path
+    body, ct = multipart_encode({"path": path}, [])
+    api(cfg, "POST", "/api/vault/mkdir", data=body, headers={"Content-Type": ct})
+    print(f"  폴더 생성: vault:{path}")
+
+
 # ── Main ──────────────────────────────────────────────
 
 def main():
@@ -228,27 +329,51 @@ def main():
     p_login = sub.add_parser("login", help="서버 로그인")
     p_login.add_argument("server", help="서버 주소 (예: https://drop.example.com)")
 
-    p_upload = sub.add_parser("upload", help="파일 업로드")
+    p_upload = sub.add_parser("upload", help="임시 파일 업로드 (drop)")
     p_upload.add_argument("files", nargs="+", help="업로드할 파일 경로")
     p_upload.add_argument("-e", "--expire", type=int, default=7, help="만료 일수 (기본 7)")
 
-    p_list = sub.add_parser("list", help="파일 목록")
+    p_list = sub.add_parser("list", help="임시 파일 목록 (drop)")
 
-    p_dl = sub.add_parser("download", help="파일 다운로드")
+    p_dl = sub.add_parser("download", help="임시 파일 다운로드 (drop)")
     p_dl.add_argument("filename", help="파일 이름 또는 ID")
     p_dl.add_argument("-o", "--output", help="저장 경로")
 
-    p_del = sub.add_parser("delete", help="파일 삭제")
+    p_del = sub.add_parser("delete", help="임시 파일 삭제 (drop)")
     p_del.add_argument("filename", nargs="?", help="파일 이름 또는 ID")
     p_del.add_argument("--all", action="store_true", help="전체 삭제")
+
+    # vault subcommand
+    p_vault = sub.add_parser("vault", help="영구 보관 (vault)")
+    vault_sub = p_vault.add_subparsers(dest="vault_command")
+
+    pv_list = vault_sub.add_parser("list", help="폴더 목록")
+    pv_list.add_argument("path", nargs="?", default="/", help="폴더 경로 (기본: /)")
+
+    pv_upload = vault_sub.add_parser("upload", help="파일 업로드")
+    pv_upload.add_argument("files", nargs="+", help="업로드할 파일 경로")
+    pv_upload.add_argument("-d", "--dest", default="/", help="vault 대상 폴더 (기본: /)")
+
+    pv_dl = vault_sub.add_parser("download", help="파일 다운로드")
+    pv_dl.add_argument("path", help="vault 파일 경로 (예: /keys/id_rsa)")
+    pv_dl.add_argument("-o", "--output", help="저장 경로")
+
+    pv_del = vault_sub.add_parser("delete", help="파일/폴더 삭제")
+    pv_del.add_argument("path", help="vault 경로")
+
+    pv_mkdir = vault_sub.add_parser("mkdir", help="폴더 생성")
+    pv_mkdir.add_argument("path", help="생성할 폴더 경로")
 
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
         return
 
-    {"login": cmd_login, "upload": cmd_upload, "list": cmd_list,
-     "download": cmd_download, "delete": cmd_delete}[args.command](args)
+    cmds = {
+        "login": cmd_login, "upload": cmd_upload, "list": cmd_list,
+        "download": cmd_download, "delete": cmd_delete, "vault": cmd_vault,
+    }
+    cmds[args.command](args)
 
 
 if __name__ == "__main__":

@@ -208,6 +208,119 @@ async def delete_all_files(session: str | None = Cookie(default=None)):
     return {"deleted": count}
 
 
+# ── Vault (permanent storage) ─────────────────────────
+
+def _safe_vault_path(path_str: str) -> Path:
+    """Resolve vault path and prevent directory traversal."""
+    cleaned = path_str.strip("/").replace("\\", "/")
+    resolved = (config.VAULT_DIR / cleaned).resolve()
+    if not str(resolved).startswith(str(config.VAULT_DIR.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    return resolved
+
+
+def _vault_storage_used() -> int:
+    total = 0
+    for f in config.VAULT_DIR.rglob("*"):
+        if f.is_file():
+            total += f.stat().st_size
+    return total
+
+
+@app.get("/api/vault")
+async def vault_list(path: str = "/", session: str | None = Cookie(default=None)):
+    _require_auth(session)
+    target = _safe_vault_path(path)
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Path not found")
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail="Not a directory")
+
+    items = []
+    for item in sorted(target.iterdir()):
+        if item.name.startswith("."):
+            continue
+        entry = {"name": item.name, "type": "dir" if item.is_dir() else "file"}
+        if item.is_file():
+            stat = item.stat()
+            entry["size"] = stat.st_size
+            entry["modified_at"] = stat.st_mtime
+        items.append(entry)
+
+    rel = "/" + str(target.relative_to(config.VAULT_DIR.resolve())).replace("\\", "/")
+    if rel == "/.":
+        rel = "/"
+    return {"path": rel, "items": items, "storage_used": _vault_storage_used()}
+
+
+@app.post("/api/vault")
+async def vault_upload(
+    files: list[UploadFile] = File(...),
+    path: str = Form(default="/"),
+    session: str | None = Cookie(default=None),
+):
+    _require_auth(session)
+    target_dir = _safe_vault_path(path)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    results = []
+
+    for f in files:
+        content = await f.read()
+        if len(content) > config.MAX_FILE_BYTES:
+            results.append({"name": f.filename, "error": "File too large"})
+            continue
+        if _vault_storage_used() + len(content) > config.MAX_VAULT_BYTES:
+            results.append({"name": f.filename, "error": "Vault storage full"})
+            continue
+
+        file_path = target_dir / f.filename
+        file_path.write_bytes(content)
+        results.append({"name": f.filename, "size": len(content)})
+
+    return {"uploaded": results}
+
+
+@app.get("/api/vault/download")
+async def vault_download(path: str, session: str | None = Cookie(default=None)):
+    _require_auth(session)
+    target = _safe_vault_path(path)
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(
+        path=str(target),
+        filename=target.name,
+        media_type="application/octet-stream",
+    )
+
+
+@app.delete("/api/vault")
+async def vault_delete(path: str, session: str | None = Cookie(default=None)):
+    _require_auth(session)
+    target = _safe_vault_path(path)
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Path not found")
+    if target == config.VAULT_DIR.resolve():
+        raise HTTPException(status_code=400, detail="Cannot delete vault root")
+
+    if target.is_file():
+        target.unlink()
+        return {"ok": True, "deleted": "file"}
+    elif target.is_dir():
+        import shutil
+        shutil.rmtree(target)
+        return {"ok": True, "deleted": "directory"}
+
+
+@app.post("/api/vault/mkdir")
+async def vault_mkdir(path: str = Form(...), session: str | None = Cookie(default=None)):
+    _require_auth(session)
+    target = _safe_vault_path(path)
+    if target.exists():
+        raise HTTPException(status_code=409, detail="Already exists")
+    target.mkdir(parents=True, exist_ok=True)
+    return {"ok": True, "path": path}
+
+
 # ── Frontend serving ──────────────────────────────────
 
 @app.get("/")

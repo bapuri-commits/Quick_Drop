@@ -107,8 +107,9 @@ header button:hover { color: var(--danger); }
 .file-icon { font-size: 1.5rem; flex-shrink: 0; }
 .file-preview {
   width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex-shrink: 0;
-  background: var(--border);
+  background: var(--border); pointer-events: none;
 }
+video.file-preview { object-fit: cover; }
 .file-info { flex: 1; min-width: 0; }
 .file-name { font-weight: 500; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-meta { font-size: 12px; color: var(--text2); margin-top: 2px; }
@@ -276,6 +277,7 @@ header button:hover { color: var(--danger); }
 <script>
 const API = window.location.origin;
 const IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','webp','svg','bmp','ico']);
+const VIDEO_EXTS = new Set(['mp4','webm','mov','ogg']);
 
 let _dropFiles = [];
 let _vaultItems = [];
@@ -306,6 +308,13 @@ function fileIcon(name) {
 }
 
 function isImage(name) { return IMAGE_EXTS.has(getExt(name)); }
+function isVideo(name) { return VIDEO_EXTS.has(getExt(name)); }
+
+function previewHtml(name, url) {
+  if (isImage(name)) return `<img class="file-preview" src="${url}" alt="" loading="lazy">`;
+  if (isVideo(name)) return `<video class="file-preview" src="${url}" muted preload="metadata"></video>`;
+  return `<div class="file-icon">${fileIcon(name)}</div>`;
+}
 
 function timeRemaining(hours) {
   if (hours < 1) return Math.round(hours * 60) + '\uBD84 \uB0A8\uC74C';
@@ -398,12 +407,10 @@ function renderFiles(files, storageUsed) {
   }
   empty.style.display = 'none';
   list.innerHTML = files.map(f => {
-    const iconHtml = isImage(f.name)
-      ? `<img class="file-preview" src="${API}/api/files/${f.id}/download" alt="" loading="lazy">`
-      : `<div class="file-icon">${fileIcon(f.name)}</div>`;
+    const dlUrl = `${API}/api/files/${f.id}/download`;
     return `
     <div class="file-card">
-      ${iconHtml}
+      ${previewHtml(f.name, dlUrl)}
       <div class="file-info">
         <div class="file-name" title="${f.name}">${f.name}</div>
         <div class="file-meta">${formatSize(f.size)} \u00B7 ${timeRemaining(f.remaining_hours)}</div>
@@ -550,12 +557,10 @@ function renderVault(items) {
 
   html += files.map(f => {
     const fpath = (_vaultPath === '/' ? '' : _vaultPath) + '/' + f.name;
-    const iconHtml = isImage(f.name)
-      ? `<img class="file-preview" src="${API}/api/vault/download?path=${encodeURIComponent(fpath)}" alt="" loading="lazy">`
-      : `<div class="file-icon">${fileIcon(f.name)}</div>`;
+    const dlUrl = `${API}/api/vault/download?path=${encodeURIComponent(fpath)}`;
     return `
     <div class="file-card">
-      ${iconHtml}
+      ${previewHtml(f.name, dlUrl)}
       <div class="file-info">
         <div class="file-name" title="${f.name}">${f.name}</div>
         <div class="file-meta">${formatSize(f.size)}</div>

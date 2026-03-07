@@ -10,14 +10,14 @@
   --accent: #2563eb; --accent-hover: #1d4ed8; --danger: #dc2626;
   --border: #e2e2e2; --drop-bg: #eff6ff; --drop-border: #93c5fd;
   --card-shadow: 0 1px 3px rgba(0,0,0,0.08);
-  --radius: 12px;
+  --radius: 12px; --vault-accent: #7c3aed;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0f0f0f; --surface: #1a1a1a; --text: #e5e5e5; --text2: #999;
     --accent: #3b82f6; --accent-hover: #60a5fa; --danger: #ef4444;
     --border: #2a2a2a; --drop-bg: #1e293b; --drop-border: #3b82f6;
-    --card-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.3); --vault-accent: #a78bfa;
   }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -42,52 +42,73 @@ body {
 
 /* ── Main ── */
 #main-view { display: none; }
-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 header h1 { font-size: 1.5rem; }
 header button { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 14px; }
 header button:hover { color: var(--danger); }
 
+/* ── Tabs ── */
+.tabs { display: flex; gap: 0; margin-bottom: 20px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
+.tab {
+  flex: 1; padding: 10px 0; text-align: center; cursor: pointer;
+  background: var(--surface); font-size: 14px; font-weight: 500;
+  border: none; color: var(--text2); transition: all 0.2s;
+}
+.tab.active { background: var(--accent); color: #fff; }
+.tab.active.vault-tab { background: var(--vault-accent); }
+
 /* ── Drop zone ── */
 .dropzone {
-  border: 2px dashed var(--border); border-radius: var(--radius); padding: 40px 20px;
+  border: 2px dashed var(--border); border-radius: var(--radius); padding: 32px 20px 20px;
   text-align: center; cursor: pointer; transition: all 0.2s;
-  background: var(--surface); margin-bottom: 20px;
+  background: var(--surface); margin-bottom: 16px;
 }
 .dropzone.dragover { border-color: var(--drop-border); background: var(--drop-bg); }
 .dropzone-icon { font-size: 2.5rem; margin-bottom: 8px; }
 .dropzone-text { color: var(--text2); font-size: 14px; }
+.dropzone-row {
+  display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 12px;
+}
 .dropzone-btn {
-  display: inline-block; margin-top: 12px; padding: 10px 24px;
-  background: var(--accent); color: #fff; border: none; border-radius: 8px;
+  padding: 10px 24px; background: var(--accent); color: #fff; border: none; border-radius: 8px;
   font-size: 14px; cursor: pointer; font-weight: 500;
 }
 .dropzone-btn:hover { background: var(--accent-hover); }
+.expire-inline {
+  display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text2);
+}
+.expire-inline select {
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--text); font-size: 13px;
+}
 
-/* ── Expire selector ── */
-.expire-row {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 16px; font-size: 14px; color: var(--text2);
+/* ── Search ── */
+.search-bar {
+  margin-bottom: 12px;
 }
-.expire-row select {
-  padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
-  background: var(--surface); color: var(--text); font-size: 14px;
+.search-bar input {
+  width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); font-size: 14px; outline: none;
 }
+.search-bar input:focus { border-color: var(--accent); }
 
 /* ── Progress ── */
-#upload-progress { display: none; margin-bottom: 16px; }
-.progress-bar {
-  height: 6px; background: var(--border); border-radius: 3px; overflow: hidden;
-}
+#upload-progress, #vault-upload-progress { display: none; margin-bottom: 16px; }
+.progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.3s; }
 .progress-text { font-size: 12px; color: var(--text2); margin-top: 4px; text-align: center; }
 
 /* ── File list ── */
 .file-card {
-  background: var(--surface); border-radius: var(--radius); padding: 14px 16px;
+  background: var(--surface); border-radius: var(--radius); padding: 12px 14px;
   margin-bottom: 8px; display: flex; align-items: center; gap: 12px;
   box-shadow: var(--card-shadow);
 }
 .file-icon { font-size: 1.5rem; flex-shrink: 0; }
+.file-preview {
+  width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex-shrink: 0;
+  background: var(--border);
+}
 .file-info { flex: 1; min-width: 0; }
 .file-name { font-weight: 500; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-meta { font-size: 12px; color: var(--text2); margin-top: 2px; }
@@ -100,6 +121,35 @@ header button:hover { color: var(--danger); }
 .btn-dl:hover { background: var(--accent-hover); }
 .btn-del { background: var(--surface); border: 1px solid var(--border) !important; color: var(--danger); }
 .btn-del:hover { background: var(--danger); color: #fff; }
+
+/* ── Vault ── */
+.vault-breadcrumb {
+  display: flex; align-items: center; gap: 4px; margin-bottom: 12px;
+  font-size: 14px; flex-wrap: wrap;
+}
+.vault-breadcrumb span { color: var(--text2); cursor: pointer; }
+.vault-breadcrumb span:hover { color: var(--accent); text-decoration: underline; }
+.vault-breadcrumb .bc-current { color: var(--text); font-weight: 500; cursor: default; }
+.vault-breadcrumb .bc-current:hover { color: var(--text); text-decoration: none; }
+.vault-breadcrumb .bc-sep { color: var(--text2); cursor: default; }
+.vault-breadcrumb .bc-sep:hover { color: var(--text2); text-decoration: none; }
+
+.vault-toolbar {
+  display: flex; gap: 8px; margin-bottom: 12px;
+}
+.vault-toolbar button {
+  padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer;
+}
+.vault-toolbar button:hover { border-color: var(--vault-accent); color: var(--vault-accent); }
+
+.folder-card {
+  background: var(--surface); border-radius: var(--radius); padding: 12px 14px;
+  margin-bottom: 8px; display: flex; align-items: center; gap: 12px;
+  box-shadow: var(--card-shadow); cursor: pointer;
+}
+.folder-card:hover { border: 1px solid var(--vault-accent); margin: -1px -1px 7px -1px; }
+.folder-icon { font-size: 1.5rem; flex-shrink: 0; }
 
 /* ── Footer ── */
 .footer {
@@ -120,6 +170,7 @@ header button:hover { color: var(--danger); }
   border-radius: var(--radius); font-size: 16px; cursor: pointer; font-weight: 500;
 }
 .btn-primary:hover { background: var(--accent-hover); }
+.hidden { display: none !important; }
 </style>
 </head>
 <body>
@@ -142,43 +193,93 @@ header button:hover { color: var(--danger); }
     <button onclick="logout()">로그아웃</button>
   </header>
 
-  <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
-    <div class="dropzone-icon">&#9729;</div>
-    <div class="dropzone-text">파일을 여기에 드래그하거나</div>
-    <button type="button" class="dropzone-btn">파일 선택</button>
-    <input type="file" id="file-input" multiple hidden>
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" id="tab-drop" onclick="switchTab('drop')">임시 전송</button>
+    <button class="tab vault-tab" id="tab-vault" onclick="switchTab('vault')">보관함</button>
   </div>
 
-  <div class="expire-row">
-    <span>자동 삭제</span>
-    <select id="expire-select">
-      <option value="1">1일</option>
-      <option value="3">3일</option>
-      <option value="7" selected>7일</option>
-      <option value="14">14일</option>
-      <option value="30">30일</option>
-    </select>
+  <!-- ═══ DROP TAB ═══ -->
+  <div id="drop-panel">
+    <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
+      <div class="dropzone-icon">&#9729;</div>
+      <div class="dropzone-text">파일을 여기에 드래그하거나</div>
+      <div class="dropzone-row">
+        <button type="button" class="dropzone-btn" onclick="event.stopPropagation();">파일 선택</button>
+        <div class="expire-inline" onclick="event.stopPropagation();">
+          <span>만료</span>
+          <select id="expire-select">
+            <option value="1">1일</option>
+            <option value="3">3일</option>
+            <option value="7" selected>7일</option>
+            <option value="14">14일</option>
+            <option value="30">30일</option>
+          </select>
+        </div>
+      </div>
+      <input type="file" id="file-input" multiple hidden>
+    </div>
+
+    <div id="upload-progress">
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="progress-text" id="progress-text">업로드 중...</div>
+    </div>
+
+    <div class="search-bar">
+      <input type="text" id="drop-search" placeholder="파일 검색..." oninput="filterDropFiles()">
+    </div>
+
+    <div id="file-list"></div>
+    <div id="empty-state" style="display:none;">
+      <div class="empty-icon">&#128193;</div>
+      <div>파일이 없습니다</div>
+    </div>
+
+    <div class="footer">
+      <span id="storage-info">0 B 사용 중</span>
+      <button onclick="deleteAll()">전체 삭제</button>
+    </div>
   </div>
 
-  <div id="upload-progress">
-    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-    <div class="progress-text" id="progress-text">업로드 중...</div>
-  </div>
+  <!-- ═══ VAULT TAB ═══ -->
+  <div id="vault-panel" class="hidden">
+    <div class="vault-breadcrumb" id="vault-breadcrumb"></div>
 
-  <div id="file-list"></div>
-  <div id="empty-state" style="display:none;">
-    <div class="empty-icon">&#128193;</div>
-    <div>파일이 없습니다</div>
-  </div>
+    <div class="vault-toolbar">
+      <button onclick="document.getElementById('vault-file-input').click()">파일 업로드</button>
+      <button onclick="vaultMkdir()">새 폴더</button>
+      <input type="file" id="vault-file-input" multiple hidden>
+    </div>
 
-  <div class="footer">
-    <span id="storage-info">0 B 사용 중</span>
-    <button onclick="deleteAll()">전체 삭제</button>
+    <div id="vault-upload-progress">
+      <div class="progress-bar"><div class="progress-fill" id="vault-progress-fill"></div></div>
+      <div class="progress-text" id="vault-progress-text">업로드 중...</div>
+    </div>
+
+    <div class="search-bar">
+      <input type="text" id="vault-search" placeholder="이 폴더에서 검색..." oninput="filterVaultItems()">
+    </div>
+
+    <div id="vault-list"></div>
+    <div id="vault-empty" style="display:none;">
+      <div class="empty-icon" style="font-size:3rem; text-align:center; padding:40px 0; color:var(--text2);">&#128193;</div>
+      <div style="text-align:center; color:var(--text2);">빈 폴더입니다</div>
+    </div>
+
+    <div class="footer">
+      <span id="vault-storage-info">0 B 사용 중</span>
+      <span></span>
+    </div>
   </div>
 </div>
 
 <script>
 const API = window.location.origin;
+const IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','webp','svg','bmp','ico']);
+
+let _dropFiles = [];
+let _vaultItems = [];
+let _vaultPath = '/';
 
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + ' B';
@@ -187,27 +288,32 @@ function formatSize(bytes) {
   return (bytes / 1073741824).toFixed(2) + ' GB';
 }
 
+function getExt(name) { return (name.split('.').pop() || '').toLowerCase(); }
+
 function fileIcon(name) {
-  const ext = (name.split('.').pop() || '').toLowerCase();
+  const ext = getExt(name);
   const map = {
-    pdf: '📄', doc: '📝', docx: '📝', txt: '📝', md: '📝',
-    png: '🖼️', jpg: '🖼️', jpeg: '🖼️', gif: '🖼️', webp: '🖼️', svg: '🖼️',
-    mp4: '🎬', mov: '🎬', avi: '🎬', mkv: '🎬', webm: '🎬',
-    mp3: '🎵', wav: '🎵', flac: '🎵',
-    zip: '📦', rar: '📦', '7z': '📦', tar: '📦', gz: '📦',
-    py: '💻', js: '💻', java: '💻', cpp: '💻', ts: '💻',
-    xlsx: '📊', xls: '📊', csv: '📊',
-    pptx: '📑', ppt: '📑',
+    pdf: '\u{1F4C4}', doc: '\u{1F4DD}', docx: '\u{1F4DD}', txt: '\u{1F4DD}', md: '\u{1F4DD}', hwp: '\u{1F4DD}', hwpx: '\u{1F4DD}',
+    png: '\u{1F5BC}\uFE0F', jpg: '\u{1F5BC}\uFE0F', jpeg: '\u{1F5BC}\uFE0F', gif: '\u{1F5BC}\uFE0F', webp: '\u{1F5BC}\uFE0F', svg: '\u{1F5BC}\uFE0F',
+    mp4: '\u{1F3AC}', mov: '\u{1F3AC}', avi: '\u{1F3AC}', mkv: '\u{1F3AC}', webm: '\u{1F3AC}',
+    mp3: '\u{1F3B5}', wav: '\u{1F3B5}', flac: '\u{1F3B5}',
+    zip: '\u{1F4E6}', rar: '\u{1F4E6}', '7z': '\u{1F4E6}', tar: '\u{1F4E6}', gz: '\u{1F4E6}',
+    py: '\u{1F4BB}', js: '\u{1F4BB}', java: '\u{1F4BB}', cpp: '\u{1F4BB}', ts: '\u{1F4BB}',
+    xlsx: '\u{1F4CA}', xls: '\u{1F4CA}', csv: '\u{1F4CA}',
+    pptx: '\u{1F4D1}', ppt: '\u{1F4D1}',
   };
-  return map[ext] || '📎';
+  return map[ext] || '\u{1F4CE}';
 }
+
+function isImage(name) { return IMAGE_EXTS.has(getExt(name)); }
 
 function timeRemaining(hours) {
-  if (hours < 1) return Math.round(hours * 60) + '분 남음';
-  if (hours < 24) return Math.round(hours) + '시간 남음';
-  return Math.round(hours / 24) + '일 남음';
+  if (hours < 1) return Math.round(hours * 60) + '\uBD84 \uB0A8\uC74C';
+  if (hours < 24) return Math.round(hours) + '\uC2DC\uAC04 \uB0A8\uC74C';
+  return Math.round(hours / 24) + '\uC77C \uB0A8\uC74C';
 }
 
+// ── Auth ──
 async function checkAuth() {
   try {
     const r = await fetch(API + '/api/auth/check', { credentials: 'include' });
@@ -252,19 +358,38 @@ function logout() {
   showLogin();
 }
 
+// ── Tabs ──
+function switchTab(tab) {
+  document.getElementById('tab-drop').classList.toggle('active', tab === 'drop');
+  document.getElementById('tab-vault').classList.toggle('active', tab === 'vault');
+  document.getElementById('drop-panel').classList.toggle('hidden', tab !== 'drop');
+  document.getElementById('vault-panel').classList.toggle('hidden', tab !== 'vault');
+  if (tab === 'drop') loadFiles();
+  else loadVault(_vaultPath);
+}
+
+// ── DROP ──
 async function loadFiles() {
   try {
     const r = await fetch(API + '/api/files', { credentials: 'include' });
     if (!r.ok) { if (r.status === 401) showLogin(); return; }
     const data = await r.json();
-    renderFiles(data.files, data.storage_used);
+    _dropFiles = data.files;
+    renderFiles(_dropFiles, data.storage_used);
   } catch {}
+}
+
+function filterDropFiles() {
+  const q = document.getElementById('drop-search').value.toLowerCase();
+  const filtered = q ? _dropFiles.filter(f => f.name.toLowerCase().includes(q)) : _dropFiles;
+  const used = _dropFiles.reduce((s, f) => s + f.size, 0);
+  renderFiles(filtered, used);
 }
 
 function renderFiles(files, storageUsed) {
   const list = document.getElementById('file-list');
   const empty = document.getElementById('empty-state');
-  document.getElementById('storage-info').textContent = formatSize(storageUsed) + ' 사용 중';
+  document.getElementById('storage-info').textContent = formatSize(storageUsed) + ' \uC0AC\uC6A9 \uC911';
 
   if (!files.length) {
     list.innerHTML = '';
@@ -272,19 +397,23 @@ function renderFiles(files, storageUsed) {
     return;
   }
   empty.style.display = 'none';
-  list.innerHTML = files.map(f => `
+  list.innerHTML = files.map(f => {
+    const iconHtml = isImage(f.name)
+      ? `<img class="file-preview" src="${API}/api/files/${f.id}/download" alt="" loading="lazy">`
+      : `<div class="file-icon">${fileIcon(f.name)}</div>`;
+    return `
     <div class="file-card">
-      <div class="file-icon">${fileIcon(f.name)}</div>
+      ${iconHtml}
       <div class="file-info">
         <div class="file-name" title="${f.name}">${f.name}</div>
-        <div class="file-meta">${formatSize(f.size)} · ${timeRemaining(f.remaining_hours)}</div>
+        <div class="file-meta">${formatSize(f.size)} \u00B7 ${timeRemaining(f.remaining_hours)}</div>
       </div>
       <div class="file-actions">
-        <button class="btn-dl" onclick="dlFile('${f.id}','${f.name.replace(/'/g, "\\'")}')" title="다운로드">&#8595;</button>
-        <button class="btn-del" onclick="delFile('${f.id}')" title="삭제">&#10005;</button>
+        <button class="btn-dl" onclick="dlFile('${f.id}','${f.name.replace(/'/g, "\\'")}')" title="\uB2E4\uC6B4\uB85C\uB4DC">&#8595;</button>
+        <button class="btn-del" onclick="delFile('${f.id}')" title="\uC0AD\uC81C">&#10005;</button>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 function dlFile(id, name) {
@@ -300,7 +429,7 @@ async function delFile(id) {
 }
 
 async function deleteAll() {
-  if (!confirm('모든 파일을 삭제할까요?')) return;
+  if (!confirm('\uBAA8\uB4E0 \uC784\uC2DC \uD30C\uC77C\uC744 \uC0AD\uC81C\uD560\uAE4C\uC694?')) return;
   await fetch(API + '/api/files', { method: 'DELETE', credentials: 'include' });
   loadFiles();
 }
@@ -316,33 +445,29 @@ async function uploadFiles(fileList) {
   const text = document.getElementById('progress-text');
   prog.style.display = 'block';
   fill.style.width = '0%';
-  text.textContent = '업로드 중...';
+  text.textContent = '\uC5C5\uB85C\uB4DC \uC911...';
 
-  try {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', API + '/api/files');
-    xhr.withCredentials = true;
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        const pct = Math.round(e.loaded / e.total * 100);
-        fill.style.width = pct + '%';
-        text.textContent = pct + '% (' + formatSize(e.loaded) + ' / ' + formatSize(e.total) + ')';
-      }
-    };
-    xhr.onload = () => {
-      fill.style.width = '100%';
-      text.textContent = '완료!';
-      setTimeout(() => { prog.style.display = 'none'; }, 1500);
-      loadFiles();
-    };
-    xhr.onerror = () => {
-      text.textContent = '업로드 실패';
-      setTimeout(() => { prog.style.display = 'none'; }, 3000);
-    };
-    xhr.send(form);
-  } catch {
-    text.textContent = '업로드 실패';
-  }
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', API + '/api/files');
+  xhr.withCredentials = true;
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) {
+      const pct = Math.round(e.loaded / e.total * 100);
+      fill.style.width = pct + '%';
+      text.textContent = pct + '% (' + formatSize(e.loaded) + ' / ' + formatSize(e.total) + ')';
+    }
+  };
+  xhr.onload = () => {
+    fill.style.width = '100%';
+    text.textContent = '\uC644\uB8CC!';
+    setTimeout(() => { prog.style.display = 'none'; }, 1500);
+    loadFiles();
+  };
+  xhr.onerror = () => {
+    text.textContent = '\uC5C5\uB85C\uB4DC \uC2E4\uD328';
+    setTimeout(() => { prog.style.display = 'none'; }, 3000);
+  };
+  xhr.send(form);
 }
 
 // Drag & drop
@@ -356,6 +481,150 @@ dz.addEventListener('drop', (e) => {
 });
 document.getElementById('file-input').addEventListener('change', (e) => {
   uploadFiles(e.target.files);
+  e.target.value = '';
+});
+
+// ── VAULT ──
+async function loadVault(path) {
+  _vaultPath = path || '/';
+  try {
+    const r = await fetch(API + '/api/vault?path=' + encodeURIComponent(_vaultPath), { credentials: 'include' });
+    if (!r.ok) { if (r.status === 401) showLogin(); return; }
+    const data = await r.json();
+    _vaultItems = data.items;
+    document.getElementById('vault-storage-info').textContent = formatSize(data.storage_used) + ' \uC0AC\uC6A9 \uC911';
+    renderBreadcrumb(data.path);
+    renderVault(_vaultItems);
+  } catch {}
+}
+
+function renderBreadcrumb(path) {
+  const bc = document.getElementById('vault-breadcrumb');
+  const parts = path.split('/').filter(Boolean);
+  let html = `<span onclick="loadVault('/')">\u{1F4C2} vault</span>`;
+  let cumulative = '';
+  for (let i = 0; i < parts.length; i++) {
+    cumulative += '/' + parts[i];
+    html += `<span class="bc-sep">/</span>`;
+    if (i === parts.length - 1) {
+      html += `<span class="bc-current">${parts[i]}</span>`;
+    } else {
+      html += `<span onclick="loadVault('${cumulative}')">${parts[i]}</span>`;
+    }
+  }
+  bc.innerHTML = html;
+}
+
+function filterVaultItems() {
+  const q = document.getElementById('vault-search').value.toLowerCase();
+  const filtered = q ? _vaultItems.filter(i => i.name.toLowerCase().includes(q)) : _vaultItems;
+  renderVault(filtered);
+}
+
+function renderVault(items) {
+  const list = document.getElementById('vault-list');
+  const empty = document.getElementById('vault-empty');
+
+  if (!items.length) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  const dirs = items.filter(i => i.type === 'dir');
+  const files = items.filter(i => i.type === 'file');
+
+  let html = dirs.map(d => `
+    <div class="folder-card" onclick="loadVault('${_vaultPath === '/' ? '' : _vaultPath}/${d.name}')">
+      <div class="folder-icon">\u{1F4C1}</div>
+      <div class="file-info">
+        <div class="file-name">${d.name}</div>
+        <div class="file-meta">\uD3F4\uB354</div>
+      </div>
+      <div class="file-actions">
+        <button class="btn-del" onclick="event.stopPropagation(); vaultDelete('${_vaultPath === '/' ? '' : _vaultPath}/${d.name}')" title="\uC0AD\uC81C">&#10005;</button>
+      </div>
+    </div>
+  `).join('');
+
+  html += files.map(f => {
+    const fpath = (_vaultPath === '/' ? '' : _vaultPath) + '/' + f.name;
+    const iconHtml = isImage(f.name)
+      ? `<img class="file-preview" src="${API}/api/vault/download?path=${encodeURIComponent(fpath)}" alt="" loading="lazy">`
+      : `<div class="file-icon">${fileIcon(f.name)}</div>`;
+    return `
+    <div class="file-card">
+      ${iconHtml}
+      <div class="file-info">
+        <div class="file-name" title="${f.name}">${f.name}</div>
+        <div class="file-meta">${formatSize(f.size)}</div>
+      </div>
+      <div class="file-actions">
+        <button class="btn-dl" onclick="vaultDownload('${fpath}','${f.name.replace(/'/g, "\\'")}')" title="\uB2E4\uC6B4\uB85C\uB4DC">&#8595;</button>
+        <button class="btn-del" onclick="vaultDelete('${fpath}')" title="\uC0AD\uC81C">&#10005;</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  list.innerHTML = html;
+}
+
+function vaultDownload(path, name) {
+  const a = document.createElement('a');
+  a.href = API + '/api/vault/download?path=' + encodeURIComponent(path);
+  a.download = name;
+  a.click();
+}
+
+async function vaultDelete(path) {
+  const name = path.split('/').pop();
+  if (!confirm(`"${name}" \uC0AD\uC81C?`)) return;
+  await fetch(API + '/api/vault?path=' + encodeURIComponent(path), { method: 'DELETE', credentials: 'include' });
+  loadVault(_vaultPath);
+}
+
+async function vaultMkdir() {
+  const name = prompt('\uD3F4\uB354 \uC774\uB984:');
+  if (!name || !name.trim()) return;
+  const fullPath = (_vaultPath === '/' ? '' : _vaultPath) + '/' + name.trim();
+  const form = new FormData();
+  form.append('path', fullPath);
+  await fetch(API + '/api/vault/mkdir', { method: 'POST', body: form, credentials: 'include' });
+  loadVault(_vaultPath);
+}
+
+document.getElementById('vault-file-input').addEventListener('change', async (e) => {
+  const fileList = e.target.files;
+  if (!fileList.length) return;
+  const form = new FormData();
+  for (const f of fileList) form.append('files', f);
+  form.append('path', _vaultPath);
+
+  const prog = document.getElementById('vault-upload-progress');
+  const fill = document.getElementById('vault-progress-fill');
+  const text = document.getElementById('vault-progress-text');
+  prog.style.display = 'block';
+  fill.style.width = '0%';
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', API + '/api/vault');
+  xhr.withCredentials = true;
+  xhr.upload.onprogress = (ev) => {
+    if (ev.lengthComputable) {
+      const pct = Math.round(ev.loaded / ev.total * 100);
+      fill.style.width = pct + '%';
+      text.textContent = pct + '%';
+    }
+  };
+  xhr.onload = () => {
+    fill.style.width = '100%';
+    text.textContent = '\uC644\uB8CC!';
+    setTimeout(() => { prog.style.display = 'none'; }, 1500);
+    loadVault(_vaultPath);
+  };
+  xhr.onerror = () => { text.textContent = '\uC2E4\uD328'; };
+  xhr.send(form);
   e.target.value = '';
 });
 

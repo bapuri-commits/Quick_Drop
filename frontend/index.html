@@ -314,8 +314,18 @@ function fileIcon(name) {
 function isImage(name) { return IMAGE_EXTS.has(getExt(name)); }
 function isVideo(name) { return VIDEO_EXTS.has(getExt(name)); }
 
+function getToken() {
+  if (window._qdToken) return window._qdToken;
+  try {
+    const t = localStorage.getItem('quickdrop_token');
+    if (t) return t;
+  } catch {}
+  const m = document.cookie.match(/(?:^|;\s*)session=([^;]*)/);
+  return m ? m[1] : '';
+}
+
 function authUrl(url) {
-  const t = localStorage.getItem('quickdrop_token');
+  const t = getToken();
   if (!t) return url;
   return url + (url.includes('?') ? '&' : '?') + 'token=' + t;
 }
@@ -368,7 +378,8 @@ async function doLogin(e) {
     const r = await fetch(API + '/api/auth', { method: 'POST', body: form, credentials: 'include' });
     if (r.ok) {
       const data = await r.json();
-      localStorage.setItem('quickdrop_token', data.token);
+      try { localStorage.setItem('quickdrop_token', data.token); } catch {}
+      window._qdToken = data.token;
       showMain();
     } else {
       document.getElementById('login-error').style.display = 'block';

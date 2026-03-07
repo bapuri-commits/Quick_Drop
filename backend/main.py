@@ -90,8 +90,8 @@ async def auth(response: Response, password: str = Form(...)):
     response.set_cookie(
         key="session",
         value=token,
-        httponly=True,
-        samesite="strict",
+        httponly=False,
+        samesite="lax",
         max_age=TOKEN_LIFETIME,
     )
     return {"ok": True, "token": token}

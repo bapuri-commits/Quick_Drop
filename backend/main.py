@@ -34,7 +34,7 @@ ALLOWED_ORIGIN = os.getenv(
 )
 
 limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(title="QuickDrop", docs_url=None, redoc_url=None)
+app = FastAPI(title="QuickDrop", docs_url=None, redoc_url=None, openapi_url=None)
 app.state.limiter = limiter
 
 

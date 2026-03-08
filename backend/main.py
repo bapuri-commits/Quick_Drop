@@ -58,6 +58,9 @@ app.add_middleware(
 META_DIR = config.UPLOAD_DIR / ".meta"
 META_DIR.mkdir(exist_ok=True)
 
+CLIP_META_DIR = config.CLIPBOARD_DIR / ".meta"
+CLIP_META_DIR.mkdir(exist_ok=True)
+
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 TOKEN_LIFETIME = 60 * 60 * 24 * 30  # 30 days
@@ -368,6 +371,222 @@ async def vault_mkdir(path: str = Form(...), session: str | None = Cookie(defaul
         raise HTTPException(status_code=409, detail="Already exists")
     target.mkdir(parents=True, exist_ok=True)
     return {"ok": True, "path": path}
+
+
+# ── Clipboard ─────────────────────────────────────────
+
+def _read_clip_meta(clip_id: str) -> dict | None:
+    meta_path = CLIP_META_DIR / f"{clip_id}.json"
+    if not meta_path.exists():
+        return None
+    return json.loads(meta_path.read_text(encoding="utf-8"))
+
+
+def _write_clip_meta(clip_id: str, meta: dict):
+    meta_path = CLIP_META_DIR / f"{clip_id}.json"
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+
+
+def _delete_clip(clip_id: str):
+    meta = _read_clip_meta(clip_id)
+    if meta:
+        if meta.get("image_name"):
+            (config.CLIPBOARD_DIR / meta["image_name"]).unlink(missing_ok=True)
+        (CLIP_META_DIR / f"{clip_id}.json").unlink(missing_ok=True)
+
+
+def _clip_storage_used() -> int:
+    total = 0
+    for meta_file in CLIP_META_DIR.glob("*.json"):
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        total += meta.get("size", 0)
+    return total
+
+
+def _clip_is_expired(meta: dict) -> bool:
+    expire_at = meta.get("expire_at")
+    if expire_at is None:
+        return False
+    return time.time() > expire_at
+
+
+@app.get("/api/clipboard")
+async def clip_list(session: str | None = Cookie(default=None)):
+    _require_auth(session)
+    clips = []
+    for meta_file in sorted(CLIP_META_DIR.glob("*.json")):
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        if _clip_is_expired(meta):
+            _delete_clip(meta["id"])
+            continue
+        entry = {
+            "id": meta["id"],
+            "title": meta["title"],
+            "type": meta["type"],
+            "size": meta["size"],
+            "created_at": meta["created_at"],
+            "expire_at": meta.get("expire_at"),
+        }
+        if meta.get("expire_at") is not None:
+            entry["remaining_seconds"] = round(meta["expire_at"] - time.time())
+        else:
+            entry["remaining_seconds"] = None
+        clips.append(entry)
+    clips.sort(key=lambda c: c["created_at"], reverse=True)
+    return {"clips": clips, "storage_used": _clip_storage_used()}
+
+
+@app.post("/api/clipboard")
+async def clip_create(
+    title: str = Form(...),
+    clip_type: str = Form(default="text"),
+    content: str = Form(default=""),
+    expire_seconds: int = Form(default=86400),
+    image: UploadFile | None = File(default=None),
+    session: str | None = Cookie(default=None),
+):
+    _require_auth(session)
+
+    clip_id = uuid.uuid4().hex[:12]
+    now = time.time()
+    expire_at = None if expire_seconds == 0 else now + expire_seconds
+
+    if clip_type == "image":
+        if not image or not image.filename:
+            raise HTTPException(status_code=400, detail="Image file required")
+        img_bytes = await image.read()
+        if len(img_bytes) > config.MAX_CLIP_IMAGE_BYTES:
+            raise HTTPException(status_code=400, detail="Image too large (max 10MB)")
+        if _clip_storage_used() + len(img_bytes) > config.MAX_CLIPBOARD_BYTES:
+            raise HTTPException(status_code=400, detail="Clipboard storage full")
+        ext = Path(image.filename).suffix or ".png"
+        image_name = f"{clip_id}{ext}"
+        (config.CLIPBOARD_DIR / image_name).write_bytes(img_bytes)
+        meta = {
+            "id": clip_id,
+            "title": title,
+            "type": "image",
+            "content": None,
+            "image_name": image_name,
+            "size": len(img_bytes),
+            "created_at": now,
+            "expire_at": expire_at,
+        }
+    else:
+        content_bytes = content.encode("utf-8")
+        if len(content_bytes) > config.MAX_CLIP_TEXT_BYTES:
+            raise HTTPException(status_code=400, detail="Text too large (max 1MB)")
+        if _clip_storage_used() + len(content_bytes) > config.MAX_CLIPBOARD_BYTES:
+            raise HTTPException(status_code=400, detail="Clipboard storage full")
+        meta = {
+            "id": clip_id,
+            "title": title,
+            "type": "text",
+            "content": content,
+            "image_name": None,
+            "size": len(content_bytes),
+            "created_at": now,
+            "expire_at": expire_at,
+        }
+
+    _write_clip_meta(clip_id, meta)
+    return {"ok": True, "id": clip_id}
+
+
+@app.get("/api/clipboard/{clip_id}")
+async def clip_get(clip_id: str, session: str | None = Cookie(default=None)):
+    _validate_file_id(clip_id)
+    _require_auth(session)
+    meta = _read_clip_meta(clip_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    if _clip_is_expired(meta):
+        _delete_clip(clip_id)
+        raise HTTPException(status_code=404, detail="Clip expired")
+    result = {
+        "id": meta["id"],
+        "title": meta["title"],
+        "type": meta["type"],
+        "size": meta["size"],
+        "created_at": meta["created_at"],
+        "expire_at": meta.get("expire_at"),
+    }
+    if meta["type"] == "text":
+        result["content"] = meta["content"]
+    return result
+
+
+@app.put("/api/clipboard/{clip_id}")
+async def clip_update(
+    clip_id: str,
+    content: str = Form(default=""),
+    session: str | None = Cookie(default=None),
+):
+    _validate_file_id(clip_id)
+    _require_auth(session)
+    meta = _read_clip_meta(clip_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    if _clip_is_expired(meta):
+        _delete_clip(clip_id)
+        raise HTTPException(status_code=404, detail="Clip expired")
+    if meta["type"] != "text":
+        raise HTTPException(status_code=400, detail="Only text clips can be updated")
+    content_bytes = content.encode("utf-8")
+    if len(content_bytes) > config.MAX_CLIP_TEXT_BYTES:
+        raise HTTPException(status_code=400, detail="Text too large (max 1MB)")
+    old_size = meta["size"]
+    new_size = len(content_bytes)
+    if _clip_storage_used() - old_size + new_size > config.MAX_CLIPBOARD_BYTES:
+        raise HTTPException(status_code=400, detail="Clipboard storage full")
+    meta["content"] = content
+    meta["size"] = new_size
+    _write_clip_meta(clip_id, meta)
+    return {"ok": True}
+
+
+@app.delete("/api/clipboard/{clip_id}")
+async def clip_delete(clip_id: str, session: str | None = Cookie(default=None)):
+    _validate_file_id(clip_id)
+    _require_auth(session)
+    meta = _read_clip_meta(clip_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    _delete_clip(clip_id)
+    return {"ok": True}
+
+
+@app.delete("/api/clipboard")
+async def clip_delete_all(session: str | None = Cookie(default=None)):
+    _require_auth(session)
+    count = 0
+    for meta_file in list(CLIP_META_DIR.glob("*.json")):
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        _delete_clip(meta["id"])
+        count += 1
+    return {"deleted": count}
+
+
+@app.get("/api/clipboard/{clip_id}/image")
+async def clip_image(
+    clip_id: str,
+    token: str | None = None,
+    session: str | None = Cookie(default=None),
+):
+    _validate_file_id(clip_id)
+    _require_auth(session, token)
+    meta = _read_clip_meta(clip_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    if _clip_is_expired(meta):
+        _delete_clip(clip_id)
+        raise HTTPException(status_code=404, detail="Clip expired")
+    if meta["type"] != "image" or not meta.get("image_name"):
+        raise HTTPException(status_code=400, detail="Not an image clip")
+    file_path = config.CLIPBOARD_DIR / meta["image_name"]
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Image file missing")
+    return FileResponse(path=str(file_path), filename=meta["image_name"])
 
 
 # ── Frontend serving ──────────────────────────────────

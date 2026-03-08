@@ -14,5 +14,12 @@ DEFAULT_EXPIRE_DAYS = int(os.getenv("QUICKDROP_EXPIRE_DAYS", "7"))
 VAULT_DIR = Path(os.getenv("QUICKDROP_VAULT_DIR", "./vault"))
 MAX_VAULT_BYTES = int(os.getenv("QUICKDROP_MAX_VAULT_GB", "10")) * 1024 ** 3
 
+# Clipboard (클립보드)
+CLIPBOARD_DIR = Path(os.getenv("QUICKDROP_CLIPBOARD_DIR", "./clipboard"))
+MAX_CLIP_TEXT_BYTES = 1 * 1024 * 1024       # 텍스트 1MB
+MAX_CLIP_IMAGE_BYTES = 10 * 1024 * 1024     # 이미지 10MB
+MAX_CLIPBOARD_BYTES = int(os.getenv("QUICKDROP_MAX_CLIPBOARD_GB", "1")) * 1024 ** 3
+
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 VAULT_DIR.mkdir(parents=True, exist_ok=True)
+CLIPBOARD_DIR.mkdir(parents=True, exist_ok=True)

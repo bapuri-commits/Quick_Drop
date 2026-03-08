@@ -10,7 +10,7 @@
   --accent: #2563eb; --accent-hover: #1d4ed8; --danger: #dc2626;
   --border: #e2e2e2; --drop-bg: #eff6ff; --drop-border: #93c5fd;
   --card-shadow: 0 1px 3px rgba(0,0,0,0.08);
-  --radius: 12px; --vault-accent: #7c3aed;
+  --radius: 12px; --vault-accent: #7c3aed; --clip-accent: #059669;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -18,6 +18,7 @@
     --accent: #3b82f6; --accent-hover: #60a5fa; --danger: #ef4444;
     --border: #2a2a2a; --drop-bg: #1e293b; --drop-border: #3b82f6;
     --card-shadow: 0 1px 3px rgba(0,0,0,0.3); --vault-accent: #a78bfa;
+    --clip-accent: #34d399;
   }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -56,6 +57,7 @@ header button:hover { color: var(--danger); }
 }
 .tab.active { background: var(--accent); color: #fff; }
 .tab.active.vault-tab { background: var(--vault-accent); }
+.tab.active.clip-tab { background: var(--clip-accent); }
 
 /* ── Drop zone ── */
 .dropzone {
@@ -167,6 +169,81 @@ video.file-preview { object-fit: cover; }
 #empty-state { text-align: center; padding: 60px 0; color: var(--text2); }
 #empty-state .empty-icon { font-size: 3rem; margin-bottom: 8px; }
 
+/* ── Clipboard ── */
+.clip-toolbar {
+  display: flex; gap: 8px; margin-bottom: 12px;
+}
+.clip-toolbar button {
+  padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer;
+}
+.clip-toolbar button:hover { border-color: var(--clip-accent); color: var(--clip-accent); }
+
+.clip-card {
+  background: var(--surface); border-radius: var(--radius); padding: 12px 14px;
+  margin-bottom: 8px; display: flex; align-items: center; gap: 12px;
+  box-shadow: var(--card-shadow); cursor: pointer;
+}
+.clip-card:hover { border: 1px solid var(--clip-accent); margin: -1px -1px 7px -1px; }
+.clip-icon { font-size: 1.5rem; flex-shrink: 0; }
+.clip-preview {
+  width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex-shrink: 0;
+  background: var(--border);
+}
+.btn-copy {
+  background: var(--clip-accent); color: #fff;
+  width: 36px; height: 36px; border: none; border-radius: 8px;
+  cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;
+}
+.btn-copy:hover { opacity: 0.85; }
+
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.modal {
+  background: var(--surface); border-radius: var(--radius); padding: 24px;
+  width: 100%; max-width: 540px; max-height: 80dvh; overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.modal h2 { font-size: 1.1rem; margin-bottom: 16px; }
+.modal-field { margin-bottom: 14px; }
+.modal-field label { display: block; font-size: 13px; color: var(--text2); margin-bottom: 4px; }
+.modal-field input, .modal-field select, .modal-field textarea {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text); font-size: 14px; outline: none;
+  font-family: inherit;
+}
+.modal-field input:focus, .modal-field textarea:focus { border-color: var(--clip-accent); }
+.modal-field textarea { min-height: 120px; resize: vertical; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.modal-actions button {
+  padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 500;
+}
+.modal-btn-primary { background: var(--clip-accent); color: #fff; }
+.modal-btn-primary:hover { opacity: 0.9; }
+.modal-btn-cancel { background: var(--border); color: var(--text); }
+.modal-btn-cancel:hover { opacity: 0.8; }
+
+.clip-type-toggle {
+  display: flex; gap: 0; border-radius: 8px; overflow: hidden; border: 1px solid var(--border);
+}
+.clip-type-toggle button {
+  flex: 1; padding: 8px 0; text-align: center; cursor: pointer;
+  background: var(--surface); font-size: 13px; border: none; color: var(--text2);
+}
+.clip-type-toggle button.active { background: var(--clip-accent); color: #fff; }
+
+.clip-view-content {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px; font-size: 14px; white-space: pre-wrap; word-break: break-all;
+  max-height: 40dvh; overflow-y: auto; margin-bottom: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+.clip-view-img {
+  max-width: 100%; border-radius: 8px; margin-bottom: 12px;
+}
+
 .btn-primary {
   padding: 14px 24px; background: var(--accent); color: #fff; border: none;
   border-radius: var(--radius); font-size: 16px; cursor: pointer; font-weight: 500;
@@ -202,6 +279,7 @@ video.file-preview { object-fit: cover; }
   <div class="tabs">
     <button class="tab active" id="tab-drop" onclick="switchTab('drop')">임시 전송</button>
     <button class="tab vault-tab" id="tab-vault" onclick="switchTab('vault')">보관함</button>
+    <button class="tab clip-tab" id="tab-clip" onclick="switchTab('clip')">클립보드</button>
   </div>
 
   <!-- ═══ DROP TAB ═══ -->
@@ -276,6 +354,33 @@ video.file-preview { object-fit: cover; }
       <span></span>
     </div>
   </div>
+
+  <!-- ═══ CLIPBOARD TAB ═══ -->
+  <div id="clip-panel" class="hidden">
+    <div class="clip-toolbar">
+      <button onclick="showClipForm()">클립보드 추가</button>
+    </div>
+
+    <div class="search-bar">
+      <input type="text" id="clip-search" placeholder="클립보드 검색..." oninput="filterClips()">
+    </div>
+
+    <div id="clip-list"></div>
+    <div id="clip-empty" style="display:none;">
+      <div style="font-size:3rem; text-align:center; padding:40px 0; color:var(--text2);">&#128203;</div>
+      <div style="text-align:center; color:var(--text2);">클립보드가 비어있습니다</div>
+    </div>
+
+    <div class="footer">
+      <span id="clip-storage-info">0 B 사용 중</span>
+      <button onclick="clipDeleteAll()">전체 삭제</button>
+    </div>
+  </div>
+</div>
+
+<!-- Clipboard Modal -->
+<div id="clip-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeClipModal()">
+  <div class="modal" id="clip-modal-content"></div>
 </div>
 
 <script>
@@ -286,6 +391,8 @@ const VIDEO_EXTS = new Set(['mp4','webm','mov','ogg']);
 let _dropFiles = [];
 let _vaultItems = [];
 let _vaultPath = '/';
+let _clipItems = [];
+let _currentTab = 'drop';
 
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + ' B';
@@ -347,8 +454,8 @@ function previewHtml(name, url) {
 }
 
 function refreshCurrent() {
-  const isVault = !document.getElementById('vault-panel').classList.contains('hidden');
-  if (isVault) loadVault(_vaultPath);
+  if (_currentTab === 'vault') loadVault(_vaultPath);
+  else if (_currentTab === 'clip') loadClips();
   else loadFiles();
 }
 
@@ -406,12 +513,16 @@ function logout() {
 
 // ── Tabs ──
 function switchTab(tab) {
+  _currentTab = tab;
   document.getElementById('tab-drop').classList.toggle('active', tab === 'drop');
   document.getElementById('tab-vault').classList.toggle('active', tab === 'vault');
+  document.getElementById('tab-clip').classList.toggle('active', tab === 'clip');
   document.getElementById('drop-panel').classList.toggle('hidden', tab !== 'drop');
   document.getElementById('vault-panel').classList.toggle('hidden', tab !== 'vault');
+  document.getElementById('clip-panel').classList.toggle('hidden', tab !== 'clip');
   if (tab === 'drop') loadFiles();
-  else loadVault(_vaultPath);
+  else if (tab === 'vault') loadVault(_vaultPath);
+  else loadClips();
 }
 
 // ── DROP ──
@@ -716,6 +827,292 @@ document.getElementById('vault-file-input').addEventListener('change', async (e)
   xhr.send(form);
   e.target.value = '';
 });
+
+// ── CLIPBOARD ──
+function clipTimeRemaining(seconds) {
+  if (seconds === null) return '\uC601\uAD6C';
+  if (seconds < 60) return '\uACE7 \uB9CC\uB8CC';
+  if (seconds < 3600) return Math.round(seconds / 60) + '\uBD84 \uB0A8\uC74C';
+  if (seconds < 86400) return Math.round(seconds / 3600) + '\uC2DC\uAC04 \uB0A8\uC74C';
+  return Math.round(seconds / 86400) + '\uC77C \uB0A8\uC74C';
+}
+
+async function loadClips() {
+  try {
+    const r = await fetch(API + '/api/clipboard', { credentials: 'include' });
+    if (!r.ok) { if (r.status === 401) showLogin(); return; }
+    const data = await r.json();
+    _clipItems = data.clips;
+    renderClips(_clipItems, data.storage_used);
+  } catch {}
+}
+
+function filterClips() {
+  const q = document.getElementById('clip-search').value.toLowerCase();
+  const filtered = q ? _clipItems.filter(c => c.title.toLowerCase().includes(q)) : _clipItems;
+  const used = _clipItems.reduce((s, c) => s + c.size, 0);
+  renderClips(filtered, used);
+}
+
+function renderClips(clips, storageUsed) {
+  const list = document.getElementById('clip-list');
+  const empty = document.getElementById('clip-empty');
+  document.getElementById('clip-storage-info').textContent = formatSize(storageUsed) + ' \uC0AC\uC6A9 \uC911';
+
+  if (!clips.length) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  list.innerHTML = clips.map(c => {
+    const safeTitle = escapeHtml(c.title);
+    const safeId = escapeAttr(c.id);
+    const icon = c.type === 'image' ? '\u{1F5BC}\uFE0F' : '\u{1F4CB}';
+    const remain = clipTimeRemaining(c.remaining_seconds);
+    let preview = '';
+    if (c.type === 'image') {
+      const imgUrl = authUrl(`${API}/api/clipboard/${c.id}/image`);
+      preview = `<img class="clip-preview" src="${imgUrl}" alt="" loading="lazy">`;
+    } else {
+      preview = `<div class="clip-icon">${icon}</div>`;
+    }
+    return `
+    <div class="clip-card" onclick="clipView('${safeId}')">
+      ${preview}
+      <div class="file-info">
+        <div class="file-name">${safeTitle}</div>
+        <div class="file-meta">${c.type === 'image' ? '\uC774\uBBF8\uC9C0' : '\uD14D\uC2A4\uD2B8'} \u00B7 ${formatSize(c.size)} \u00B7 ${remain}</div>
+      </div>
+      <div class="file-actions">
+        <button class="btn-copy" onclick="event.stopPropagation(); clipCopy('${safeId}')" title="\uBCF5\uC0AC">&#128203;</button>
+        <button class="btn-del" onclick="event.stopPropagation(); clipDelete('${safeId}')" title="\uC0AD\uC81C">&#10005;</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function closeClipModal() {
+  document.getElementById('clip-modal').classList.add('hidden');
+}
+
+function showClipForm() {
+  const modal = document.getElementById('clip-modal-content');
+  modal.innerHTML = `
+    <h2>\uD074\uB9BD\uBCF4\uB4DC \uCD94\uAC00</h2>
+    <div class="modal-field">
+      <label>\uC81C\uBAA9</label>
+      <input type="text" id="clip-title" placeholder="\uC81C\uBAA9\uC744 \uC785\uB825\uD558\uC138\uC694">
+    </div>
+    <div class="modal-field">
+      <label>\uD0C0\uC785</label>
+      <div class="clip-type-toggle">
+        <button class="active" onclick="setClipType('text')" id="clip-type-text">\uD14D\uC2A4\uD2B8</button>
+        <button onclick="setClipType('image')" id="clip-type-image">\uC774\uBBF8\uC9C0</button>
+      </div>
+    </div>
+    <div class="modal-field" id="clip-text-field">
+      <label>\uB0B4\uC6A9</label>
+      <textarea id="clip-content" placeholder="\uD14D\uC2A4\uD2B8\uB97C \uC785\uB825\uD558\uC138\uC694..."></textarea>
+    </div>
+    <div class="modal-field hidden" id="clip-image-field">
+      <label>\uC774\uBBF8\uC9C0</label>
+      <input type="file" id="clip-image-input" accept="image/*">
+      <div id="clip-paste-hint" style="font-size:12px;color:var(--text2);margin-top:4px;">Ctrl+V\uB85C \uC774\uBBF8\uC9C0 \uBD99\uC5EC\uB123\uAE30 \uAC00\uB2A5</div>
+    </div>
+    <div class="modal-field">
+      <label>\uB9CC\uB8CC</label>
+      <select id="clip-expire">
+        <option value="3600">1\uC2DC\uAC04</option>
+        <option value="21600">6\uC2DC\uAC04</option>
+        <option value="86400" selected>1\uC77C</option>
+        <option value="604800">7\uC77C</option>
+        <option value="0">\uC601\uAD6C</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-btn-cancel" onclick="closeClipModal()">\uCDE8\uC18C</button>
+      <button class="modal-btn-primary" onclick="submitClip()">\uCD94\uAC00</button>
+    </div>
+  `;
+  document.getElementById('clip-modal').classList.remove('hidden');
+  document.getElementById('clip-title').focus();
+}
+
+let _clipFormType = 'text';
+let _clipPastedFile = null;
+
+function setClipType(type) {
+  _clipFormType = type;
+  _clipPastedFile = null;
+  document.getElementById('clip-type-text').classList.toggle('active', type === 'text');
+  document.getElementById('clip-type-image').classList.toggle('active', type === 'image');
+  document.getElementById('clip-text-field').classList.toggle('hidden', type !== 'text');
+  document.getElementById('clip-image-field').classList.toggle('hidden', type !== 'image');
+}
+
+document.addEventListener('paste', (e) => {
+  const modal = document.getElementById('clip-modal');
+  if (modal.classList.contains('hidden')) return;
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      _clipPastedFile = item.getAsFile();
+      setClipType('image');
+      const hint = document.getElementById('clip-paste-hint');
+      if (hint) hint.textContent = '\uBD99\uC5EC\uB123\uAE30 \uC644\uB8CC: ' + _clipPastedFile.name;
+      return;
+    }
+  }
+});
+
+async function submitClip() {
+  const title = document.getElementById('clip-title').value.trim();
+  if (!title) { alert('\uC81C\uBAA9\uC744 \uC785\uB825\uD558\uC138\uC694.'); return; }
+
+  const expire = document.getElementById('clip-expire').value;
+  const form = new FormData();
+  form.append('title', title);
+  form.append('clip_type', _clipFormType);
+  form.append('expire_seconds', expire);
+
+  if (_clipFormType === 'text') {
+    const content = document.getElementById('clip-content').value;
+    if (!content) { alert('\uB0B4\uC6A9\uC744 \uC785\uB825\uD558\uC138\uC694.'); return; }
+    form.append('content', content);
+  } else {
+    const fileInput = document.getElementById('clip-image-input');
+    const file = _clipPastedFile || (fileInput.files && fileInput.files[0]);
+    if (!file) { alert('\uC774\uBBF8\uC9C0\uB97C \uC120\uD0DD\uD558\uC138\uC694.'); return; }
+    form.append('image', file);
+  }
+
+  try {
+    const r = await fetch(API + '/api/clipboard', {
+      method: 'POST', body: form, credentials: 'include'
+    });
+    if (r.ok) {
+      closeClipModal();
+      _clipPastedFile = null;
+      loadClips();
+    } else if (r.status === 401) {
+      showLogin();
+    } else {
+      const data = await r.json();
+      alert(data.detail || '\uCD94\uAC00 \uC2E4\uD328');
+    }
+  } catch {
+    alert('\uC5F0\uACB0 \uC2E4\uD328');
+  }
+}
+
+async function clipCopy(id) {
+  try {
+    const r = await fetch(API + '/api/clipboard/' + id, { credentials: 'include' });
+    if (!r.ok) { if (r.status === 401) showLogin(); return; }
+    const data = await r.json();
+    if (data.type === 'text') {
+      await navigator.clipboard.writeText(data.content);
+      showToast('\uBCF5\uC0AC \uC644\uB8CC');
+    } else {
+      const imgUrl = authUrl(`${API}/api/clipboard/${id}/image`);
+      const imgResp = await fetch(imgUrl, { credentials: 'include' });
+      const blob = await imgResp.blob();
+      try {
+        await navigator.clipboard.write([
+          new ClipboardItem({ [blob.type]: blob })
+        ]);
+        showToast('\uC774\uBBF8\uC9C0 \uBCF5\uC0AC \uC644\uB8CC');
+      } catch {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = data.title || 'image';
+        a.click();
+        showToast('\uC774\uBBF8\uC9C0 \uB2E4\uC6B4\uB85C\uB4DC');
+      }
+    }
+  } catch { showToast('\uBCF5\uC0AC \uC2E4\uD328'); }
+}
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--surface);color:var(--text);padding:10px 20px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.2);font-size:14px;z-index:200;';
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2000);
+}
+
+async function clipView(id) {
+  try {
+    const r = await fetch(API + '/api/clipboard/' + id, { credentials: 'include' });
+    if (!r.ok) { if (r.status === 401) showLogin(); return; }
+    const data = await r.json();
+    const modal = document.getElementById('clip-modal-content');
+    const safeTitle = escapeHtml(data.title);
+
+    if (data.type === 'text') {
+      const safeContent = escapeHtml(data.content);
+      modal.innerHTML = `
+        <h2>${safeTitle}</h2>
+        <div class="clip-view-content">${safeContent}</div>
+        <div class="modal-field">
+          <label>\uB0B4\uC6A9 \uC218\uC815</label>
+          <textarea id="clip-edit-content">${safeContent}</textarea>
+        </div>
+        <div class="modal-actions">
+          <button class="modal-btn-cancel" onclick="closeClipModal()">\uB2EB\uAE30</button>
+          <button class="modal-btn-primary" onclick="clipCopy('${escapeAttr(id)}'); closeClipModal()">\uBCF5\uC0AC</button>
+          <button class="modal-btn-primary" onclick="clipUpdate('${escapeAttr(id)}')">\uC800\uC7A5</button>
+        </div>
+      `;
+    } else {
+      const imgUrl = authUrl(`${API}/api/clipboard/${id}/image`);
+      modal.innerHTML = `
+        <h2>${safeTitle}</h2>
+        <img class="clip-view-img" src="${imgUrl}" alt="">
+        <div class="modal-actions">
+          <button class="modal-btn-cancel" onclick="closeClipModal()">\uB2EB\uAE30</button>
+          <button class="modal-btn-primary" onclick="clipCopy('${escapeAttr(id)}'); closeClipModal()">\uBCF5\uC0AC</button>
+        </div>
+      `;
+    }
+    document.getElementById('clip-modal').classList.remove('hidden');
+  } catch {}
+}
+
+async function clipUpdate(id) {
+  const content = document.getElementById('clip-edit-content').value;
+  const form = new FormData();
+  form.append('content', content);
+  try {
+    const r = await fetch(API + '/api/clipboard/' + id, {
+      method: 'PUT', body: form, credentials: 'include'
+    });
+    if (r.ok) {
+      closeClipModal();
+      loadClips();
+      showToast('\uC800\uC7A5 \uC644\uB8CC');
+    } else {
+      const data = await r.json();
+      alert(data.detail || '\uC800\uC7A5 \uC2E4\uD328');
+    }
+  } catch { alert('\uC5F0\uACB0 \uC2E4\uD328'); }
+}
+
+async function clipDelete(id) {
+  if (!confirm('\uC0AD\uC81C\uD560\uAE4C\uC694?')) return;
+  await fetch(API + '/api/clipboard/' + id, { method: 'DELETE', credentials: 'include' });
+  loadClips();
+}
+
+async function clipDeleteAll() {
+  if (!confirm('\uBAA8\uB4E0 \uD074\uB9BD\uBCF4\uB4DC\uB97C \uC0AD\uC81C\uD560\uAE4C\uC694?')) return;
+  await fetch(API + '/api/clipboard', { method: 'DELETE', credentials: 'include' });
+  loadClips();
+}
 
 checkAuth();
 </script>

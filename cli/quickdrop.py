@@ -320,6 +320,145 @@ def cmd_vault_mkdir(args):
     print(f"  폴더 생성: vault:{path}")
 
 
+# ── Clipboard commands ────────────────────────────────
+
+EXPIRE_MAP = {
+    "1h": 3600, "6h": 21600, "1d": 86400, "7d": 604800, "permanent": 0,
+}
+
+
+def cmd_clip(args):
+    clip_action = args.clip_command
+    if not clip_action:
+        print("사용법: quickdrop clip {list|add|get|delete}")
+        return
+    {"list": cmd_clip_list, "add": cmd_clip_add,
+     "get": cmd_clip_get, "delete": cmd_clip_delete}[clip_action](args)
+
+
+def cmd_clip_list(args):
+    cfg = _require_cfg()
+    data = api(cfg, "GET", "/api/clipboard")
+    clips = data["clips"]
+    if not clips:
+        print("클립보드가 비어있습니다.")
+        return
+
+    print(f"\n{'제목':<30} {'타입':>6}  {'크기':>10}  {'남은 시간':>10}")
+    print("─" * 62)
+    for c in clips:
+        rs = c["remaining_seconds"]
+        if rs is None:
+            remaining = "영구"
+        elif rs < 60:
+            remaining = "곧 만료"
+        elif rs < 3600:
+            remaining = f"{rs // 60}분"
+        elif rs < 86400:
+            remaining = f"{rs // 3600}시간"
+        else:
+            remaining = f"{rs // 86400}일"
+        title = c["title"][:28] + ".." if len(c["title"]) > 30 else c["title"]
+        ctype = "이미지" if c["type"] == "image" else "텍스트"
+        print(f"  {title:<28} {ctype:>6}  {format_size(c['size']):>10}  {remaining:>8}")
+    print(f"\n  총 {len(clips)}개 · {format_size(data['storage_used'])} 사용 중")
+
+
+def cmd_clip_add(args):
+    cfg = _require_cfg()
+
+    expire_str = args.expire or "1d"
+    expire_seconds = EXPIRE_MAP.get(expire_str)
+    if expire_seconds is None:
+        print(f"잘못된 만료 옵션: {expire_str} (가능: 1h, 6h, 1d, 7d, permanent)")
+        sys.exit(1)
+
+    if args.file:
+        p = Path(args.file)
+        if not p.exists():
+            print(f"파일 없음: {p}")
+            sys.exit(1)
+        file_data = [("image", (p.name, p.read_bytes()))]
+        fields = {
+            "title": args.title,
+            "clip_type": "image",
+            "expire_seconds": str(expire_seconds),
+            "content": "",
+        }
+        body, ct = multipart_encode(fields, file_data)
+        print(f"  이미지 업로드: {p.name} ({format_size(p.stat().st_size)})")
+    else:
+        content = args.content or ""
+        if not content and not sys.stdin.isatty():
+            content = sys.stdin.read()
+        if not content:
+            print("내용이 필요합니다. 내용을 인자로 전달하거나 stdin으로 파이프하세요.")
+            sys.exit(1)
+        fields = {
+            "title": args.title,
+            "clip_type": "text",
+            "expire_seconds": str(expire_seconds),
+            "content": content,
+        }
+        body, ct = multipart_encode(fields, [])
+
+    result = api(cfg, "POST", "/api/clipboard", data=body, headers={"Content-Type": ct})
+    print(f"  추가 완료: \"{args.title}\" (id: {result['id']})")
+
+
+def cmd_clip_get(args):
+    cfg = _require_cfg()
+    data = api(cfg, "GET", "/api/clipboard")
+    target = args.title_or_id
+    match = None
+    for c in data["clips"]:
+        if c["title"] == target or c["id"] == target:
+            match = c
+            break
+
+    if not match:
+        print(f"클립을 찾을 수 없습니다: {target}")
+        return
+
+    if match["type"] == "text":
+        detail = api(cfg, "GET", f"/api/clipboard/{match['id']}")
+        print(detail["content"])
+    else:
+        from urllib.parse import quote
+        resp = api(cfg, "GET", f"/api/clipboard/{match['id']}/image", stream=True)
+        out_path = Path(args.output) if args.output else Path(match["title"].replace("/", "_") + ".png")
+        with open(out_path, "wb") as fp:
+            while True:
+                chunk = resp.read(8192)
+                if not chunk:
+                    break
+                fp.write(chunk)
+        print(f"  이미지 저장: {out_path} ({format_size(out_path.stat().st_size)})")
+
+
+def cmd_clip_delete(args):
+    cfg = _require_cfg()
+    if args.all:
+        api(cfg, "DELETE", "/api/clipboard")
+        print("클립보드 전체 삭제 완료.")
+        return
+
+    data = api(cfg, "GET", "/api/clipboard")
+    target = args.title_or_id
+    match = None
+    for c in data["clips"]:
+        if c["title"] == target or c["id"] == target:
+            match = c
+            break
+
+    if not match:
+        print(f"클립을 찾을 수 없습니다: {target}")
+        return
+
+    api(cfg, "DELETE", f"/api/clipboard/{match['id']}")
+    print(f"  삭제 완료: {match['title']}")
+
+
 # ── Main ──────────────────────────────────────────────
 
 def main():
@@ -364,6 +503,26 @@ def main():
     pv_mkdir = vault_sub.add_parser("mkdir", help="폴더 생성")
     pv_mkdir.add_argument("path", help="생성할 폴더 경로")
 
+    # clip subcommand
+    p_clip = sub.add_parser("clip", help="클립보드")
+    clip_sub = p_clip.add_subparsers(dest="clip_command")
+
+    pc_list = clip_sub.add_parser("list", help="클립보드 목록")
+
+    pc_add = clip_sub.add_parser("add", help="클립보드 추가")
+    pc_add.add_argument("title", help="클립 제목")
+    pc_add.add_argument("content", nargs="?", default="", help="텍스트 내용 (생략 시 stdin)")
+    pc_add.add_argument("-f", "--file", help="이미지 파일 경로")
+    pc_add.add_argument("-e", "--expire", default="1d", help="만료 (1h|6h|1d|7d|permanent, 기본 1d)")
+
+    pc_get = clip_sub.add_parser("get", help="클립 내용 조회")
+    pc_get.add_argument("title_or_id", help="제목 또는 ID")
+    pc_get.add_argument("-o", "--output", help="이미지 저장 경로")
+
+    pc_del = clip_sub.add_parser("delete", help="클립 삭제")
+    pc_del.add_argument("title_or_id", nargs="?", help="제목 또는 ID")
+    pc_del.add_argument("--all", action="store_true", help="전체 삭제")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -372,6 +531,7 @@ def main():
     cmds = {
         "login": cmd_login, "upload": cmd_upload, "list": cmd_list,
         "download": cmd_download, "delete": cmd_delete, "vault": cmd_vault,
+        "clip": cmd_clip,
     }
     cmds[args.command](args)
 

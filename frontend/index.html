@@ -314,14 +314,23 @@ function fileIcon(name) {
 function isImage(name) { return IMAGE_EXTS.has(getExt(name)); }
 function isVideo(name) { return VIDEO_EXTS.has(getExt(name)); }
 
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function escapeAttr(s) {
+  return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 function getToken() {
   if (window._qdToken) return window._qdToken;
   try {
     const t = localStorage.getItem('quickdrop_token');
     if (t) return t;
   } catch {}
-  const m = document.cookie.match(/(?:^|;\s*)session=([^;]*)/);
-  return m ? m[1] : '';
+  return '';
 }
 
 function authUrl(url) {
@@ -436,25 +445,27 @@ function renderFiles(files, storageUsed) {
   empty.style.display = 'none';
   list.innerHTML = files.map(f => {
     const dlUrl = `${API}/api/files/${f.id}/download`;
+    const safeName = escapeHtml(f.name);
+    const safeAttrName = escapeAttr(f.name);
     return `
     <div class="file-card">
       ${previewHtml(f.name, dlUrl)}
       <div class="file-info">
-        <div class="file-name" title="${f.name}">${f.name}</div>
+        <div class="file-name" title="${safeAttrName}">${safeName}</div>
         <div class="file-meta">${formatSize(f.size)} \u00B7 ${timeRemaining(f.remaining_hours)}</div>
       </div>
       <div class="file-actions">
-        <button class="btn-dl" onclick="dlFile('${f.id}','${f.name.replace(/'/g, "\\'")}')" title="\uB2E4\uC6B4\uB85C\uB4DC">&#8595;</button>
-        <button class="btn-del" onclick="delFile('${f.id}')" title="\uC0AD\uC81C">&#10005;</button>
+        <button class="btn-dl" onclick="dlFile('${escapeAttr(f.id)}')" title="\uB2E4\uC6B4\uB85C\uB4DC">&#8595;</button>
+        <button class="btn-del" onclick="delFile('${escapeAttr(f.id)}')" title="\uC0AD\uC81C">&#10005;</button>
       </div>
     </div>`;
   }).join('');
 }
 
-function dlFile(id, name) {
+function dlFile(id) {
   const a = document.createElement('a');
-  a.href = API + '/api/files/' + id + '/download';
-  a.download = name;
+  a.href = API + '/api/files/' + encodeURIComponent(id) + '/download';
+  a.download = '';
   a.click();
 }
 
@@ -549,18 +560,28 @@ async function loadVault(path) {
 function renderBreadcrumb(path) {
   const bc = document.getElementById('vault-breadcrumb');
   const parts = path.split('/').filter(Boolean);
-  let html = `<span onclick="loadVault('/')">\u{1F4C2} vault</span>`;
+  bc.textContent = '';
+  const root = document.createElement('span');
+  root.textContent = '\u{1F4C2} vault';
+  root.onclick = () => loadVault('/');
+  bc.appendChild(root);
   let cumulative = '';
   for (let i = 0; i < parts.length; i++) {
     cumulative += '/' + parts[i];
-    html += `<span class="bc-sep">/</span>`;
+    const sep = document.createElement('span');
+    sep.className = 'bc-sep';
+    sep.textContent = '/';
+    bc.appendChild(sep);
+    const span = document.createElement('span');
+    span.textContent = parts[i];
     if (i === parts.length - 1) {
-      html += `<span class="bc-current">${parts[i]}</span>`;
+      span.className = 'bc-current';
     } else {
-      html += `<span onclick="loadVault('${cumulative}')">${parts[i]}</span>`;
+      const p = cumulative;
+      span.onclick = () => loadVault(p);
     }
+    bc.appendChild(span);
   }
-  bc.innerHTML = html;
 }
 
 function filterVaultItems() {
@@ -583,32 +604,41 @@ function renderVault(items) {
   const dirs = items.filter(i => i.type === 'dir');
   const files = items.filter(i => i.type === 'file');
 
-  let html = dirs.map(d => `
-    <div class="folder-card" onclick="loadVault('${_vaultPath === '/' ? '' : _vaultPath}/${d.name}')">
+  const base = _vaultPath === '/' ? '' : _vaultPath;
+
+  let html = dirs.map(d => {
+    const dirPath = base + '/' + d.name;
+    const safeName = escapeHtml(d.name);
+    const safePath = escapeAttr(dirPath);
+    return `
+    <div class="folder-card" onclick="loadVault('${safePath}')">
       <div class="folder-icon">\u{1F4C1}</div>
       <div class="file-info">
-        <div class="file-name">${d.name}</div>
+        <div class="file-name">${safeName}</div>
         <div class="file-meta">\uD3F4\uB354</div>
       </div>
       <div class="file-actions">
-        <button class="btn-del" onclick="event.stopPropagation(); vaultDelete('${_vaultPath === '/' ? '' : _vaultPath}/${d.name}')" title="\uC0AD\uC81C">&#10005;</button>
+        <button class="btn-del" onclick="event.stopPropagation(); vaultDelete('${safePath}')" title="\uC0AD\uC81C">&#10005;</button>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 
   html += files.map(f => {
-    const fpath = (_vaultPath === '/' ? '' : _vaultPath) + '/' + f.name;
+    const fpath = base + '/' + f.name;
+    const safeName = escapeHtml(f.name);
+    const safeAttrName = escapeAttr(f.name);
+    const safePath = escapeAttr(fpath);
     const dlUrl = `${API}/api/vault/download?path=${encodeURIComponent(fpath)}`;
     return `
     <div class="file-card">
       ${previewHtml(f.name, dlUrl)}
       <div class="file-info">
-        <div class="file-name" title="${f.name}">${f.name}</div>
+        <div class="file-name" title="${safeAttrName}">${safeName}</div>
         <div class="file-meta">${formatSize(f.size)}</div>
       </div>
       <div class="file-actions">
-        <button class="btn-dl" onclick="vaultDownload('${fpath}','${f.name.replace(/'/g, "\\'")}')" title="\uB2E4\uC6B4\uB85C\uB4DC">&#8595;</button>
-        <button class="btn-del" onclick="vaultDelete('${fpath}')" title="\uC0AD\uC81C">&#10005;</button>
+        <button class="btn-dl" onclick="vaultDownload('${safePath}')" title="\uB2E4\uC6B4\uB85C\uB4DC">&#8595;</button>
+        <button class="btn-del" onclick="vaultDelete('${safePath}')" title="\uC0AD\uC81C">&#10005;</button>
       </div>
     </div>`;
   }).join('');
@@ -616,10 +646,10 @@ function renderVault(items) {
   list.innerHTML = html;
 }
 
-function vaultDownload(path, name) {
+function vaultDownload(path) {
   const a = document.createElement('a');
   a.href = API + '/api/vault/download?path=' + encodeURIComponent(path);
-  a.download = name;
+  a.download = '';
   a.click();
 }
 

@@ -2,6 +2,9 @@
 
 import hashlib
 import json
+import os
+import re
+import secrets
 import time
 import uuid
 from pathlib import Path
@@ -12,21 +15,44 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
+    Request,
     Response,
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 import config
 
+ALLOWED_ORIGIN = os.getenv(
+    "QUICKDROP_ALLOWED_ORIGIN", "https://drop.syworkspace.cloud"
+)
+
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="QuickDrop", docs_url=None, redoc_url=None)
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return Response(
+        content='{"detail":"Too many requests"}',
+        status_code=429,
+        media_type="application/json",
+    )
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[ALLOWED_ORIGIN],
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
 META_DIR = config.UPLOAD_DIR / ".meta"
@@ -38,8 +64,7 @@ TOKEN_LIFETIME = 60 * 60 * 24 * 30  # 30 days
 _valid_tokens: dict[str, float] = {}
 
 
-def _hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()[:16]
+_FILE_ID_RE = re.compile(r"^[a-f0-9]{12}$")
 
 
 def _require_auth(session: str | None, token: str | None = None):
@@ -49,6 +74,21 @@ def _require_auth(session: str | None, token: str | None = None):
     if time.time() - _valid_tokens[effective] > TOKEN_LIFETIME:
         _valid_tokens.pop(effective, None)
         raise HTTPException(status_code=401, detail="Session expired")
+
+
+def _validate_file_id(file_id: str):
+    if not _FILE_ID_RE.match(file_id):
+        raise HTTPException(status_code=400, detail="Invalid file ID")
+
+
+def _safe_filename(name: str | None) -> str:
+    """Extract basename and strip path traversal components."""
+    if not name:
+        return "unnamed"
+    safe = Path(name).name
+    if not safe or safe in (".", ".."):
+        return "unnamed"
+    return safe
 
 
 def _read_meta(file_id: str) -> dict | None:
@@ -82,15 +122,17 @@ def _total_storage_used() -> int:
 # ── Auth ──────────────────────────────────────────────
 
 @app.post("/api/auth")
-async def auth(response: Response, password: str = Form(...)):
-    if password != config.PASSWORD:
+@limiter.limit("5/minute")
+async def auth(request: Request, response: Response, password: str = Form(...)):
+    if not secrets.compare_digest(password, config.PASSWORD):
         raise HTTPException(status_code=403, detail="Wrong password")
     token = uuid.uuid4().hex
     _valid_tokens[token] = time.time()
     response.set_cookie(
         key="session",
         value=token,
-        httponly=False,
+        httponly=True,
+        secure=True,
         samesite="lax",
         max_age=TOKEN_LIFETIME,
     )
@@ -171,6 +213,7 @@ async def upload_files(
 
 @app.get("/api/files/{file_id}/download")
 async def download_file(file_id: str, token: str | None = None, session: str | None = Cookie(default=None)):
+    _validate_file_id(file_id)
     _require_auth(session, token)
     meta = _read_meta(file_id)
     if not meta:
@@ -190,6 +233,7 @@ async def download_file(file_id: str, token: str | None = None, session: str | N
 
 @app.delete("/api/files/{file_id}")
 async def delete_file(file_id: str, session: str | None = Cookie(default=None)):
+    _validate_file_id(file_id)
     _require_auth(session)
     meta = _read_meta(file_id)
     if not meta:
@@ -267,16 +311,20 @@ async def vault_upload(
 
     for f in files:
         content = await f.read()
+        safe_name = _safe_filename(f.filename)
         if len(content) > config.MAX_FILE_BYTES:
-            results.append({"name": f.filename, "error": "File too large"})
+            results.append({"name": safe_name, "error": "File too large"})
             continue
         if _vault_storage_used() + len(content) > config.MAX_VAULT_BYTES:
-            results.append({"name": f.filename, "error": "Vault storage full"})
+            results.append({"name": safe_name, "error": "Vault storage full"})
             continue
 
-        file_path = target_dir / f.filename
+        file_path = (target_dir / safe_name).resolve()
+        if not str(file_path).startswith(str(config.VAULT_DIR.resolve())):
+            results.append({"name": safe_name, "error": "Invalid filename"})
+            continue
         file_path.write_bytes(content)
-        results.append({"name": f.filename, "size": len(content)})
+        results.append({"name": safe_name, "size": len(content)})
 
     return {"uploaded": results}
 

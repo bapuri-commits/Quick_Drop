@@ -2,6 +2,9 @@
 
 > DevOps 로드맵 Stage 2~5 실전 적용 프로젝트.
 > 도메인: `syworkspace.cloud` (가비아), 서브도메인: `drop.syworkspace.cloud`
+>
+> **참조**: nginx/systemd 설정의 중앙 관리 사본은 `SyOps/deploy/`에 있습니다.
+> DevOps 로드맵 전체는 `SyOps/docs/DEVOPS_ROADMAP.md`를 참조하세요.
 
 ---
 

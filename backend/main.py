@@ -1,28 +1,31 @@
-"""QuickDrop — Personal file cloud API."""
+"""QuickDrop — Personal file cloud API (SyOps 계정 통합)."""
 
-import hashlib
+from __future__ import annotations
+
 import json
 import os
 import re
-import secrets
+import shutil
 import time
 import uuid
 from pathlib import Path
 
+import httpx
+import jwt
 from fastapi import (
     Cookie,
     FastAPI,
     File,
     Form,
+    Header,
     HTTPException,
-    Query,
     Request,
     Response,
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -55,28 +58,80 @@ app.add_middleware(
     allow_credentials=True,
 )
 
-META_DIR = config.UPLOAD_DIR / ".meta"
-META_DIR.mkdir(exist_ok=True)
-
-CLIP_META_DIR = config.CLIPBOARD_DIR / ".meta"
-CLIP_META_DIR.mkdir(exist_ok=True)
-
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
-TOKEN_LIFETIME = 60 * 60 * 24 * 30  # 30 days
-_valid_tokens: dict[str, float] = {}
-
-
 _FILE_ID_RE = re.compile(r"^[a-f0-9]{12}$")
+JWT_ALGORITHM = "HS256"
 
 
-def _require_auth(session: str | None, token: str | None = None):
-    effective = session or token
-    if not effective or effective not in _valid_tokens:
+# ── Auth ──────────────────────────────────────────────
+
+
+def _decode_jwt(token: str) -> dict:
+    try:
+        payload = jwt.decode(token, config.SYOPS_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        if payload.get("type") != "access":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+def _require_auth(
+    syops_token: str | None = None,
+    authorization: str | None = None,
+    token: str | None = None,
+) -> dict:
+    """JWT 검증 후 {"user_id": int, "username": str, "role": str} 반환."""
+    raw = syops_token or token
+    if not raw and authorization and authorization.startswith("Bearer "):
+        raw = authorization[7:]
+    if not raw:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    if time.time() - _valid_tokens[effective] > TOKEN_LIFETIME:
-        _valid_tokens.pop(effective, None)
-        raise HTTPException(status_code=401, detail="Session expired")
+    payload = _decode_jwt(raw)
+    return {
+        "user_id": int(payload["sub"]),
+        "username": payload.get("username", "unknown"),
+        "role": payload.get("role", "user"),
+    }
+
+
+# ── Per-user directory helpers ────────────────────────
+
+
+def _user_upload_dir(user_id: int) -> Path:
+    d = config.UPLOAD_DIR / str(user_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _user_meta_dir(user_id: int) -> Path:
+    d = _user_upload_dir(user_id) / ".meta"
+    d.mkdir(exist_ok=True)
+    return d
+
+
+def _user_vault_dir(user_id: int) -> Path:
+    d = config.VAULT_DIR / str(user_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _user_clipboard_dir(user_id: int) -> Path:
+    d = config.CLIPBOARD_DIR / str(user_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _user_clip_meta_dir(user_id: int) -> Path:
+    d = _user_clipboard_dir(user_id) / ".meta"
+    d.mkdir(exist_ok=True)
+    return d
+
+
+# ── File meta helpers (user-scoped) ───────────────────
 
 
 def _validate_file_id(file_id: str):
@@ -85,7 +140,6 @@ def _validate_file_id(file_id: str):
 
 
 def _safe_filename(name: str | None) -> str:
-    """Extract basename and strip path traversal components."""
     if not name:
         return "unnamed"
     safe = Path(name).name
@@ -94,73 +148,59 @@ def _safe_filename(name: str | None) -> str:
     return safe
 
 
-def _read_meta(file_id: str) -> dict | None:
-    meta_path = META_DIR / f"{file_id}.json"
+def _read_meta(user_id: int, file_id: str) -> dict | None:
+    meta_path = _user_meta_dir(user_id) / f"{file_id}.json"
     if not meta_path.exists():
         return None
     return json.loads(meta_path.read_text(encoding="utf-8"))
 
 
-def _write_meta(file_id: str, meta: dict):
-    meta_path = META_DIR / f"{file_id}.json"
+def _write_meta(user_id: int, file_id: str, meta: dict):
+    meta_path = _user_meta_dir(user_id) / f"{file_id}.json"
     meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
 
-def _delete_file(file_id: str):
-    meta = _read_meta(file_id)
+def _delete_file(user_id: int, file_id: str):
+    meta = _read_meta(user_id, file_id)
     if meta:
-        file_path = config.UPLOAD_DIR / meta["stored_name"]
+        file_path = _user_upload_dir(user_id) / meta["stored_name"]
         file_path.unlink(missing_ok=True)
-        (META_DIR / f"{file_id}.json").unlink(missing_ok=True)
+        (_user_meta_dir(user_id) / f"{file_id}.json").unlink(missing_ok=True)
 
 
-def _total_storage_used() -> int:
+def _total_storage_used(user_id: int) -> int:
     total = 0
-    for meta_file in META_DIR.glob("*.json"):
+    meta_dir = _user_meta_dir(user_id)
+    for meta_file in meta_dir.glob("*.json"):
         meta = json.loads(meta_file.read_text(encoding="utf-8"))
         total += meta.get("size", 0)
     return total
 
 
-# ── Auth ──────────────────────────────────────────────
-
-@app.post("/api/auth")
-@limiter.limit("5/minute")
-async def auth(request: Request, response: Response, password: str = Form(...)):
-    if not secrets.compare_digest(password, config.PASSWORD):
-        raise HTTPException(status_code=403, detail="Wrong password")
-    token = uuid.uuid4().hex
-    _valid_tokens[token] = time.time()
-    response.set_cookie(
-        key="session",
-        value=token,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        max_age=TOKEN_LIFETIME,
-    )
-    return {"ok": True, "token": token}
+# ── Auth endpoints ────────────────────────────────────
 
 
 @app.get("/api/auth/check")
-async def auth_check(session: str | None = Cookie(default=None)):
-    if session and session in _valid_tokens:
-        if time.time() - _valid_tokens[session] <= TOKEN_LIFETIME:
-            return {"authenticated": True}
-    raise HTTPException(status_code=401, detail="Unauthorized")
+async def auth_check(syops_token: str | None = Cookie(default=None)):
+    if not syops_token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    info = _require_auth(syops_token=syops_token)
+    return {"authenticated": True, "username": info["username"]}
 
 
 # ── Files ─────────────────────────────────────────────
 
+
 @app.get("/api/files")
-async def list_files(session: str | None = Cookie(default=None)):
-    _require_auth(session)
+async def list_files(syops_token: str | None = Cookie(default=None), authorization: str | None = Header(default=None)):
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
     files = []
-    for meta_file in sorted(META_DIR.glob("*.json")):
+    for meta_file in sorted(_user_meta_dir(uid).glob("*.json")):
         meta = json.loads(meta_file.read_text(encoding="utf-8"))
         remaining = meta["expire_at"] - time.time()
         if remaining <= 0:
-            _delete_file(meta["id"])
+            _delete_file(uid, meta["id"])
             continue
         files.append({
             "id": meta["id"],
@@ -169,18 +209,21 @@ async def list_files(session: str | None = Cookie(default=None)):
             "uploaded_at": meta["uploaded_at"],
             "expire_at": meta["expire_at"],
             "remaining_hours": round(remaining / 3600, 1),
+            "from_user": meta.get("from_user"),
         })
     files.sort(key=lambda f: f["uploaded_at"], reverse=True)
-    return {"files": files, "storage_used": _total_storage_used()}
+    return {"files": files, "storage_used": _total_storage_used(uid), "username": user["username"]}
 
 
 @app.post("/api/files")
 async def upload_files(
     files: list[UploadFile] = File(...),
     expire_days: int = Form(default=config.DEFAULT_EXPIRE_DAYS),
-    session: str | None = Cookie(default=None),
+    syops_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
 ):
-    _require_auth(session)
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
     expire_days = max(1, min(expire_days, 30))
     results = []
 
@@ -189,15 +232,14 @@ async def upload_files(
         if len(content) > config.MAX_FILE_BYTES:
             results.append({"name": f.filename, "error": "File too large"})
             continue
-
-        if _total_storage_used() + len(content) > config.MAX_STORAGE_BYTES:
+        if _total_storage_used(uid) + len(content) > config.MAX_STORAGE_BYTES:
             results.append({"name": f.filename, "error": "Storage full"})
             continue
 
         file_id = uuid.uuid4().hex[:12]
         ext = Path(f.filename or "file").suffix
         stored_name = f"{file_id}{ext}"
-        file_path = config.UPLOAD_DIR / stored_name
+        file_path = _user_upload_dir(uid) / stored_name
         file_path.write_bytes(content)
 
         meta = {
@@ -207,24 +249,30 @@ async def upload_files(
             "size": len(content),
             "uploaded_at": time.time(),
             "expire_at": time.time() + expire_days * 86400,
+            "owner_id": uid,
         }
-        _write_meta(file_id, meta)
+        _write_meta(uid, file_id, meta)
         results.append({"name": f.filename, "id": file_id, "size": len(content)})
 
     return {"uploaded": results}
 
 
 @app.get("/api/files/{file_id}/download")
-async def download_file(file_id: str, token: str | None = None, session: str | None = Cookie(default=None)):
+async def download_file(
+    file_id: str,
+    syops_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
     _validate_file_id(file_id)
-    _require_auth(session, token)
-    meta = _read_meta(file_id)
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
+    meta = _read_meta(uid, file_id)
     if not meta:
         raise HTTPException(status_code=404, detail="File not found")
     if time.time() > meta["expire_at"]:
-        _delete_file(file_id)
+        _delete_file(uid, file_id)
         raise HTTPException(status_code=404, detail="File expired")
-    file_path = config.UPLOAD_DIR / meta["stored_name"]
+    file_path = _user_upload_dir(uid) / meta["stored_name"]
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File missing")
     return FileResponse(
@@ -235,50 +283,123 @@ async def download_file(file_id: str, token: str | None = None, session: str | N
 
 
 @app.delete("/api/files/{file_id}")
-async def delete_file(file_id: str, session: str | None = Cookie(default=None)):
+async def delete_file(file_id: str, syops_token: str | None = Cookie(default=None), authorization: str | None = Header(default=None)):
     _validate_file_id(file_id)
-    _require_auth(session)
-    meta = _read_meta(file_id)
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
+    meta = _read_meta(uid, file_id)
     if not meta:
         raise HTTPException(status_code=404, detail="File not found")
-    _delete_file(file_id)
+    _delete_file(uid, file_id)
     return {"ok": True}
 
 
 @app.delete("/api/files")
-async def delete_all_files(session: str | None = Cookie(default=None)):
-    _require_auth(session)
+async def delete_all_files(syops_token: str | None = Cookie(default=None), authorization: str | None = Header(default=None)):
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
     count = 0
-    for meta_file in list(META_DIR.glob("*.json")):
+    for meta_file in list(_user_meta_dir(uid).glob("*.json")):
         meta = json.loads(meta_file.read_text(encoding="utf-8"))
-        _delete_file(meta["id"])
+        _delete_file(uid, meta["id"])
         count += 1
     return {"deleted": count}
 
 
+# ── File Send ─────────────────────────────────────────
+
+
+class SendRequest(BaseModel):
+    to_username: str
+
+
+@app.post("/api/files/{file_id}/send")
+async def send_file(
+    file_id: str,
+    body: SendRequest,
+    syops_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    _validate_file_id(file_id)
+    sender = _require_auth(syops_token, authorization)
+    sender_uid = sender["user_id"]
+
+    if body.to_username == sender["username"]:
+        raise HTTPException(status_code=400, detail="Cannot send to yourself")
+
+    meta = _read_meta(sender_uid, file_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="File not found")
+    if time.time() > meta["expire_at"]:
+        _delete_file(sender_uid, file_id)
+        raise HTTPException(status_code=404, detail="File expired")
+
+    target_user = await _lookup_user(body.to_username, syops_token or "")
+    target_uid = target_user["id"]
+
+    src_path = _user_upload_dir(sender_uid) / meta["stored_name"]
+    if not src_path.exists():
+        raise HTTPException(status_code=404, detail="File missing")
+
+    new_file_id = uuid.uuid4().hex[:12]
+    ext = Path(meta["stored_name"]).suffix
+    new_stored = f"{new_file_id}{ext}"
+    dst_path = _user_upload_dir(target_uid) / new_stored
+    shutil.copy2(str(src_path), str(dst_path))
+
+    new_meta = {
+        "id": new_file_id,
+        "original_name": meta["original_name"],
+        "stored_name": new_stored,
+        "size": meta["size"],
+        "uploaded_at": time.time(),
+        "expire_at": time.time() + 7 * 86400,
+        "owner_id": target_uid,
+        "from_user": sender["username"],
+    }
+    _write_meta(target_uid, new_file_id, new_meta)
+
+    return {"ok": True, "sent_to": body.to_username, "new_file_id": new_file_id}
+
+
+async def _lookup_user(username: str, token: str) -> dict:
+    """SyOps API로 username → user 정보 조회."""
+    url = f"{config.SYOPS_API_URL}/api/auth/users/{username}"
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail=f"User '{username}' not found")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to look up user")
+    return resp.json()
+
+
 # ── Vault (permanent storage) ─────────────────────────
 
-def _safe_vault_path(path_str: str) -> Path:
-    """Resolve vault path and prevent directory traversal."""
+
+def _safe_vault_path(user_id: int, path_str: str) -> Path:
+    vault_root = _user_vault_dir(user_id)
     cleaned = path_str.strip("/").replace("\\", "/")
-    resolved = (config.VAULT_DIR / cleaned).resolve()
-    if not str(resolved).startswith(str(config.VAULT_DIR.resolve())):
+    resolved = (vault_root / cleaned).resolve()
+    if not str(resolved).startswith(str(vault_root.resolve())):
         raise HTTPException(status_code=400, detail="Invalid path")
     return resolved
 
 
-def _vault_storage_used() -> int:
+def _vault_storage_used(user_id: int) -> int:
     total = 0
-    for f in config.VAULT_DIR.rglob("*"):
+    vault_root = _user_vault_dir(user_id)
+    for f in vault_root.rglob("*"):
         if f.is_file():
             total += f.stat().st_size
     return total
 
 
 @app.get("/api/vault")
-async def vault_list(path: str = "/", session: str | None = Cookie(default=None)):
-    _require_auth(session)
-    target = _safe_vault_path(path)
+async def vault_list(path: str = "/", syops_token: str | None = Cookie(default=None), authorization: str | None = Header(default=None)):
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
+    target = _safe_vault_path(uid, path)
     if not target.exists():
         raise HTTPException(status_code=404, detail="Path not found")
     if not target.is_dir():
@@ -295,20 +416,23 @@ async def vault_list(path: str = "/", session: str | None = Cookie(default=None)
             entry["modified_at"] = stat.st_mtime
         items.append(entry)
 
-    rel = "/" + str(target.relative_to(config.VAULT_DIR.resolve())).replace("\\", "/")
+    vault_root = _user_vault_dir(uid)
+    rel = "/" + str(target.relative_to(vault_root.resolve())).replace("\\", "/")
     if rel == "/.":
         rel = "/"
-    return {"path": rel, "items": items, "storage_used": _vault_storage_used()}
+    return {"path": rel, "items": items, "storage_used": _vault_storage_used(uid)}
 
 
 @app.post("/api/vault")
 async def vault_upload(
     files: list[UploadFile] = File(...),
     path: str = Form(default="/"),
-    session: str | None = Cookie(default=None),
+    syops_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
 ):
-    _require_auth(session)
-    target_dir = _safe_vault_path(path)
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
+    target_dir = _safe_vault_path(uid, path)
     target_dir.mkdir(parents=True, exist_ok=True)
     results = []
 
@@ -318,12 +442,13 @@ async def vault_upload(
         if len(content) > config.MAX_FILE_BYTES:
             results.append({"name": safe_name, "error": "File too large"})
             continue
-        if _vault_storage_used() + len(content) > config.MAX_VAULT_BYTES:
+        if _vault_storage_used(uid) + len(content) > config.MAX_VAULT_BYTES:
             results.append({"name": safe_name, "error": "Vault storage full"})
             continue
 
+        vault_root = _user_vault_dir(uid)
         file_path = (target_dir / safe_name).resolve()
-        if not str(file_path).startswith(str(config.VAULT_DIR.resolve())):
+        if not str(file_path).startswith(str(vault_root.resolve())):
             results.append({"name": safe_name, "error": "Invalid filename"})
             continue
         file_path.write_bytes(content)
@@ -333,9 +458,14 @@ async def vault_upload(
 
 
 @app.get("/api/vault/download")
-async def vault_download(path: str, token: str | None = None, session: str | None = Cookie(default=None)):
-    _require_auth(session, token)
-    target = _safe_vault_path(path)
+async def vault_download(
+    path: str,
+    syops_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
+    target = _safe_vault_path(uid, path)
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(
@@ -346,27 +476,29 @@ async def vault_download(path: str, token: str | None = None, session: str | Non
 
 
 @app.delete("/api/vault")
-async def vault_delete(path: str, session: str | None = Cookie(default=None)):
-    _require_auth(session)
-    target = _safe_vault_path(path)
+async def vault_delete(path: str, syops_token: str | None = Cookie(default=None), authorization: str | None = Header(default=None)):
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
+    target = _safe_vault_path(uid, path)
     if not target.exists():
         raise HTTPException(status_code=404, detail="Path not found")
-    if target == config.VAULT_DIR.resolve():
+    vault_root = _user_vault_dir(uid)
+    if target == vault_root.resolve():
         raise HTTPException(status_code=400, detail="Cannot delete vault root")
 
     if target.is_file():
         target.unlink()
         return {"ok": True, "deleted": "file"}
     elif target.is_dir():
-        import shutil
         shutil.rmtree(target)
         return {"ok": True, "deleted": "directory"}
 
 
 @app.post("/api/vault/mkdir")
-async def vault_mkdir(path: str = Form(...), session: str | None = Cookie(default=None)):
-    _require_auth(session)
-    target = _safe_vault_path(path)
+async def vault_mkdir(path: str = Form(...), syops_token: str | None = Cookie(default=None), authorization: str | None = Header(default=None)):
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
+    target = _safe_vault_path(uid, path)
     if target.exists():
         raise HTTPException(status_code=409, detail="Already exists")
     target.mkdir(parents=True, exist_ok=True)
@@ -375,29 +507,30 @@ async def vault_mkdir(path: str = Form(...), session: str | None = Cookie(defaul
 
 # ── Clipboard ─────────────────────────────────────────
 
-def _read_clip_meta(clip_id: str) -> dict | None:
-    meta_path = CLIP_META_DIR / f"{clip_id}.json"
+
+def _read_clip_meta(user_id: int, clip_id: str) -> dict | None:
+    meta_path = _user_clip_meta_dir(user_id) / f"{clip_id}.json"
     if not meta_path.exists():
         return None
     return json.loads(meta_path.read_text(encoding="utf-8"))
 
 
-def _write_clip_meta(clip_id: str, meta: dict):
-    meta_path = CLIP_META_DIR / f"{clip_id}.json"
+def _write_clip_meta(user_id: int, clip_id: str, meta: dict):
+    meta_path = _user_clip_meta_dir(user_id) / f"{clip_id}.json"
     meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
 
-def _delete_clip(clip_id: str):
-    meta = _read_clip_meta(clip_id)
+def _delete_clip(user_id: int, clip_id: str):
+    meta = _read_clip_meta(user_id, clip_id)
     if meta:
         if meta.get("image_name"):
-            (config.CLIPBOARD_DIR / meta["image_name"]).unlink(missing_ok=True)
-        (CLIP_META_DIR / f"{clip_id}.json").unlink(missing_ok=True)
+            (_user_clipboard_dir(user_id) / meta["image_name"]).unlink(missing_ok=True)
+        (_user_clip_meta_dir(user_id) / f"{clip_id}.json").unlink(missing_ok=True)
 
 
-def _clip_storage_used() -> int:
+def _clip_storage_used(user_id: int) -> int:
     total = 0
-    for meta_file in CLIP_META_DIR.glob("*.json"):
+    for meta_file in _user_clip_meta_dir(user_id).glob("*.json"):
         meta = json.loads(meta_file.read_text(encoding="utf-8"))
         total += meta.get("size", 0)
     return total
@@ -411,13 +544,14 @@ def _clip_is_expired(meta: dict) -> bool:
 
 
 @app.get("/api/clipboard")
-async def clip_list(session: str | None = Cookie(default=None)):
-    _require_auth(session)
+async def clip_list(syops_token: str | None = Cookie(default=None), authorization: str | None = Header(default=None)):
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
     clips = []
-    for meta_file in sorted(CLIP_META_DIR.glob("*.json")):
+    for meta_file in sorted(_user_clip_meta_dir(uid).glob("*.json")):
         meta = json.loads(meta_file.read_text(encoding="utf-8"))
         if _clip_is_expired(meta):
-            _delete_clip(meta["id"])
+            _delete_clip(uid, meta["id"])
             continue
         entry = {
             "id": meta["id"],
@@ -433,7 +567,7 @@ async def clip_list(session: str | None = Cookie(default=None)):
             entry["remaining_seconds"] = None
         clips.append(entry)
     clips.sort(key=lambda c: c["created_at"], reverse=True)
-    return {"clips": clips, "storage_used": _clip_storage_used()}
+    return {"clips": clips, "storage_used": _clip_storage_used(uid)}
 
 
 @app.post("/api/clipboard")
@@ -443,9 +577,11 @@ async def clip_create(
     content: str = Form(default=""),
     expire_seconds: int = Form(default=86400),
     image: UploadFile | None = File(default=None),
-    session: str | None = Cookie(default=None),
+    syops_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
 ):
-    _require_auth(session)
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
 
     clip_id = uuid.uuid4().hex[:12]
     now = time.time()
@@ -457,11 +593,11 @@ async def clip_create(
         img_bytes = await image.read()
         if len(img_bytes) > config.MAX_CLIP_IMAGE_BYTES:
             raise HTTPException(status_code=400, detail="Image too large (max 10MB)")
-        if _clip_storage_used() + len(img_bytes) > config.MAX_CLIPBOARD_BYTES:
+        if _clip_storage_used(uid) + len(img_bytes) > config.MAX_CLIPBOARD_BYTES:
             raise HTTPException(status_code=400, detail="Clipboard storage full")
         ext = Path(image.filename).suffix or ".png"
         image_name = f"{clip_id}{ext}"
-        (config.CLIPBOARD_DIR / image_name).write_bytes(img_bytes)
+        (_user_clipboard_dir(uid) / image_name).write_bytes(img_bytes)
         meta = {
             "id": clip_id,
             "title": title,
@@ -471,12 +607,13 @@ async def clip_create(
             "size": len(img_bytes),
             "created_at": now,
             "expire_at": expire_at,
+            "owner_id": uid,
         }
     else:
         content_bytes = content.encode("utf-8")
         if len(content_bytes) > config.MAX_CLIP_TEXT_BYTES:
             raise HTTPException(status_code=400, detail="Text too large (max 1MB)")
-        if _clip_storage_used() + len(content_bytes) > config.MAX_CLIPBOARD_BYTES:
+        if _clip_storage_used(uid) + len(content_bytes) > config.MAX_CLIPBOARD_BYTES:
             raise HTTPException(status_code=400, detail="Clipboard storage full")
         meta = {
             "id": clip_id,
@@ -487,21 +624,23 @@ async def clip_create(
             "size": len(content_bytes),
             "created_at": now,
             "expire_at": expire_at,
+            "owner_id": uid,
         }
 
-    _write_clip_meta(clip_id, meta)
+    _write_clip_meta(uid, clip_id, meta)
     return {"ok": True, "id": clip_id}
 
 
 @app.get("/api/clipboard/{clip_id}")
-async def clip_get(clip_id: str, session: str | None = Cookie(default=None)):
+async def clip_get(clip_id: str, syops_token: str | None = Cookie(default=None), authorization: str | None = Header(default=None)):
     _validate_file_id(clip_id)
-    _require_auth(session)
-    meta = _read_clip_meta(clip_id)
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
+    meta = _read_clip_meta(uid, clip_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Clip not found")
     if _clip_is_expired(meta):
-        _delete_clip(clip_id)
+        _delete_clip(uid, clip_id)
         raise HTTPException(status_code=404, detail="Clip expired")
     result = {
         "id": meta["id"],
@@ -520,15 +659,17 @@ async def clip_get(clip_id: str, session: str | None = Cookie(default=None)):
 async def clip_update(
     clip_id: str,
     content: str = Form(default=""),
-    session: str | None = Cookie(default=None),
+    syops_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
 ):
     _validate_file_id(clip_id)
-    _require_auth(session)
-    meta = _read_clip_meta(clip_id)
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
+    meta = _read_clip_meta(uid, clip_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Clip not found")
     if _clip_is_expired(meta):
-        _delete_clip(clip_id)
+        _delete_clip(uid, clip_id)
         raise HTTPException(status_code=404, detail="Clip expired")
     if meta["type"] != "text":
         raise HTTPException(status_code=400, detail="Only text clips can be updated")
@@ -537,32 +678,34 @@ async def clip_update(
         raise HTTPException(status_code=400, detail="Text too large (max 1MB)")
     old_size = meta["size"]
     new_size = len(content_bytes)
-    if _clip_storage_used() - old_size + new_size > config.MAX_CLIPBOARD_BYTES:
+    if _clip_storage_used(uid) - old_size + new_size > config.MAX_CLIPBOARD_BYTES:
         raise HTTPException(status_code=400, detail="Clipboard storage full")
     meta["content"] = content
     meta["size"] = new_size
-    _write_clip_meta(clip_id, meta)
+    _write_clip_meta(uid, clip_id, meta)
     return {"ok": True}
 
 
 @app.delete("/api/clipboard/{clip_id}")
-async def clip_delete(clip_id: str, session: str | None = Cookie(default=None)):
+async def clip_delete(clip_id: str, syops_token: str | None = Cookie(default=None), authorization: str | None = Header(default=None)):
     _validate_file_id(clip_id)
-    _require_auth(session)
-    meta = _read_clip_meta(clip_id)
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
+    meta = _read_clip_meta(uid, clip_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Clip not found")
-    _delete_clip(clip_id)
+    _delete_clip(uid, clip_id)
     return {"ok": True}
 
 
 @app.delete("/api/clipboard")
-async def clip_delete_all(session: str | None = Cookie(default=None)):
-    _require_auth(session)
+async def clip_delete_all(syops_token: str | None = Cookie(default=None), authorization: str | None = Header(default=None)):
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
     count = 0
-    for meta_file in list(CLIP_META_DIR.glob("*.json")):
+    for meta_file in list(_user_clip_meta_dir(uid).glob("*.json")):
         meta = json.loads(meta_file.read_text(encoding="utf-8"))
-        _delete_clip(meta["id"])
+        _delete_clip(uid, meta["id"])
         count += 1
     return {"deleted": count}
 
@@ -570,26 +713,28 @@ async def clip_delete_all(session: str | None = Cookie(default=None)):
 @app.get("/api/clipboard/{clip_id}/image")
 async def clip_image(
     clip_id: str,
-    token: str | None = None,
-    session: str | None = Cookie(default=None),
+    syops_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
 ):
     _validate_file_id(clip_id)
-    _require_auth(session, token)
-    meta = _read_clip_meta(clip_id)
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
+    meta = _read_clip_meta(uid, clip_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Clip not found")
     if _clip_is_expired(meta):
-        _delete_clip(clip_id)
+        _delete_clip(uid, clip_id)
         raise HTTPException(status_code=404, detail="Clip expired")
     if meta["type"] != "image" or not meta.get("image_name"):
         raise HTTPException(status_code=400, detail="Not an image clip")
-    file_path = config.CLIPBOARD_DIR / meta["image_name"]
+    file_path = _user_clipboard_dir(uid) / meta["image_name"]
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image file missing")
     return FileResponse(path=str(file_path), filename=meta["image_name"])
 
 
 # ── Frontend serving ──────────────────────────────────
+
 
 @app.get("/")
 async def serve_frontend():

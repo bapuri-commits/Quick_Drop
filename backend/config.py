@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-PASSWORD = os.getenv("QUICKDROP_PASSWORD", "changeme")
-SECRET_KEY = os.getenv("QUICKDROP_SECRET_KEY", "dev-secret-key-change-in-prod")
+SYOPS_SECRET_KEY = os.getenv("SYOPS_SECRET_KEY", "dev-secret")
+SYOPS_API_URL = os.getenv("SYOPS_API_URL", "http://host.docker.internal:8300")
 
 # Drop (임시 전송)
 UPLOAD_DIR = Path(os.getenv("QUICKDROP_UPLOAD_DIR", "./uploads"))

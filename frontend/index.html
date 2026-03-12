@@ -254,21 +254,17 @@ video.file-preview { object-fit: cover; }
 </head>
 <body>
 
-<!-- Login -->
-<div id="login-view" class="container">
+<!-- Login redirect (SyOps 계정으로 로그인) -->
+<div id="login-view" class="container" style="display:none;">
   <h1>QuickDrop</h1>
   <p>개인 파일 클라우드</p>
-  <form id="login-form" onsubmit="return doLogin(event)">
-    <input type="password" id="pw-input" placeholder="비밀번호" autocomplete="current-password">
-    <button type="submit" class="btn-primary">로그인</button>
-  </form>
-  <div id="login-error">비밀번호가 틀렸습니다</div>
+  <p style="color:var(--text2);margin-bottom:16px;">로그인이 필요합니다. SyOps 계정으로 이동합니다...</p>
 </div>
 
 <!-- Main -->
 <div id="main-view" class="container">
   <header>
-    <h1>QuickDrop</h1>
+    <div><h1 style="display:inline;">QuickDrop</h1> <span id="user-display" style="font-size:13px;color:var(--text2);"></span></div>
     <div style="display:flex;gap:12px;align-items:center;">
       <button onclick="refreshCurrent()" title="새로고침">&#8635;</button>
       <button onclick="logout()">로그아웃</button>
@@ -431,25 +427,9 @@ function escapeAttr(s) {
   return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function getToken() {
-  if (window._qdToken) return window._qdToken;
-  try {
-    const t = localStorage.getItem('quickdrop_token');
-    if (t) return t;
-  } catch {}
-  return '';
-}
-
-function authUrl(url) {
-  const t = getToken();
-  if (!t) return url;
-  return url + (url.includes('?') ? '&' : '?') + 'token=' + t;
-}
-
 function previewHtml(name, url) {
-  const aurl = authUrl(url);
-  if (isImage(name)) return `<img class="file-preview" src="${aurl}" alt="" loading="lazy">`;
-  if (isVideo(name)) return `<video class="file-preview" src="${aurl}" muted preload="metadata"></video>`;
+  if (isImage(name)) return `<img class="file-preview" src="${url}" alt="" loading="lazy">`;
+  if (isVideo(name)) return `<video class="file-preview" src="${url}" muted preload="metadata"></video>`;
   return `<div class="file-icon">${fileIcon(name)}</div>`;
 }
 
@@ -465,19 +445,27 @@ function timeRemaining(hours) {
   return Math.round(hours / 24) + '\uC77C \uB0A8\uC74C';
 }
 
+const SYOPS_LOGIN = 'https://syworkspace.cloud/login';
+
 // ── Auth ──
 async function checkAuth() {
   try {
     const r = await fetch(API + '/api/auth/check', { credentials: 'include' });
-    if (r.ok) { showMain(); return; }
+    if (r.ok) {
+      const data = await r.json();
+      document.getElementById('user-display').textContent = data.username ? `(${data.username})` : '';
+      showMain();
+      return;
+    }
   } catch {}
-  showLogin();
+  redirectToLogin();
 }
 
-function showLogin() {
-  document.getElementById('login-view').style.display = 'flex';
-  document.getElementById('main-view').style.display = 'none';
+function redirectToLogin() {
+  window.location.href = SYOPS_LOGIN + '?redirect=' + encodeURIComponent(window.location.href);
 }
+
+function showLogin() { redirectToLogin(); }
 
 function showMain() {
   document.getElementById('login-view').style.display = 'none';
@@ -485,30 +473,27 @@ function showMain() {
   loadFiles();
 }
 
-async function doLogin(e) {
-  e.preventDefault();
-  const pw = document.getElementById('pw-input').value;
-  const form = new FormData();
-  form.append('password', pw);
-  try {
-    const r = await fetch(API + '/api/auth', { method: 'POST', body: form, credentials: 'include' });
-    if (r.ok) {
-      const data = await r.json();
-      try { localStorage.setItem('quickdrop_token', data.token); } catch {}
-      window._qdToken = data.token;
-      showMain();
-    } else {
-      document.getElementById('login-error').style.display = 'block';
-    }
-  } catch {
-    document.getElementById('login-error').style.display = 'block';
-  }
+function logout() {
+  window.location.href = SYOPS_LOGIN;
 }
 
-function logout() {
-  document.cookie = 'session=; Max-Age=0; path=/';
-  localStorage.removeItem('quickdrop_token');
-  showLogin();
+async function sendFile(fileId) {
+  const username = prompt('\uBCF4\uB0BC \uC0AC\uC6A9\uC790 \uC544\uC774\uB514:');
+  if (!username || !username.trim()) return;
+  try {
+    const r = await fetch(API + '/api/files/' + fileId + '/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ to_username: username.trim() }),
+    });
+    if (r.ok) {
+      showToast('\uD30C\uC77C\uC744 ' + username.trim() + '\uC5D0\uAC8C \uBCF4\uB0C8\uC2B5\uB2C8\uB2E4');
+    } else {
+      const data = await r.json();
+      alert(data.detail || '\uBCF4\uB0B4\uAE30 \uC2E4\uD328');
+    }
+  } catch { alert('\uC5F0\uACB0 \uC2E4\uD328'); }
 }
 
 // ── Tabs ──
@@ -563,9 +548,10 @@ function renderFiles(files, storageUsed) {
       ${previewHtml(f.name, dlUrl)}
       <div class="file-info">
         <div class="file-name" title="${safeAttrName}">${safeName}</div>
-        <div class="file-meta">${formatSize(f.size)} \u00B7 ${timeRemaining(f.remaining_hours)}</div>
+        <div class="file-meta">${formatSize(f.size)} \u00B7 ${timeRemaining(f.remaining_hours)}${f.from_user ? ' \u00B7 from ' + escapeHtml(f.from_user) : ''}</div>
       </div>
       <div class="file-actions">
+        <button class="btn-dl" onclick="sendFile('${escapeAttr(f.id)}')" title="\uBCF4\uB0B4\uAE30">&#128228;</button>
         <button class="btn-dl" onclick="dlFile('${escapeAttr(f.id)}')" title="\uB2E4\uC6B4\uB85C\uB4DC">&#8595;</button>
         <button class="btn-del" onclick="delFile('${escapeAttr(f.id)}')" title="\uC0AD\uC81C">&#10005;</button>
       </div>
@@ -873,8 +859,7 @@ function renderClips(clips, storageUsed) {
     const remain = clipTimeRemaining(c.remaining_seconds);
     let preview = '';
     if (c.type === 'image') {
-      const imgUrl = authUrl(`${API}/api/clipboard/${c.id}/image`);
-      preview = `<img class="clip-preview" src="${imgUrl}" alt="" loading="lazy">`;
+      preview = `<img class="clip-preview" src="${API}/api/clipboard/${c.id}/image" alt="" loading="lazy">`;
     } else {
       preview = `<div class="clip-icon">${icon}</div>`;
     }
@@ -1018,8 +1003,7 @@ async function clipCopy(id) {
       await navigator.clipboard.writeText(data.content);
       showToast('\uBCF5\uC0AC \uC644\uB8CC');
     } else {
-      const imgUrl = authUrl(`${API}/api/clipboard/${id}/image`);
-      const imgResp = await fetch(imgUrl, { credentials: 'include' });
+      const imgResp = await fetch(`${API}/api/clipboard/${id}/image`, { credentials: 'include' });
       const blob = await imgResp.blob();
       try {
         await navigator.clipboard.write([
@@ -1069,10 +1053,9 @@ async function clipView(id) {
         </div>
       `;
     } else {
-      const imgUrl = authUrl(`${API}/api/clipboard/${id}/image`);
       modal.innerHTML = `
         <h2>${safeTitle}</h2>
-        <img class="clip-view-img" src="${imgUrl}" alt="">
+        <img class="clip-view-img" src="${API}/api/clipboard/${id}/image" alt="">
         <div class="modal-actions">
           <button class="modal-btn-cancel" onclick="closeClipModal()">\uB2EB\uAE30</button>
           <button class="modal-btn-primary" onclick="clipCopy('${escapeAttr(id)}'); closeClipModal()">\uBCF5\uC0AC</button>

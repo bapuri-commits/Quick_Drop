@@ -3,13 +3,17 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    container_name: quickdrop
     ports:
       - "8200:8200"
     volumes:
-      - quickdrop-data:/app/uploads
+      - ${DATA_DIR:-../data}/drop:/data/drop
+      - ${DATA_DIR:-../data}/vault:/data/vault
+      - ${DATA_DIR:-../data}/clipboard:/data/clipboard
+    environment:
+      QUICKDROP_UPLOAD_DIR: /data/drop
+      QUICKDROP_VAULT_DIR: /data/vault
+      QUICKDROP_CLIPBOARD_DIR: /data/clipboard
     env_file:
-      - ../.env
+      - .env
     restart: unless-stopped
-
-volumes:
-  quickdrop-data:

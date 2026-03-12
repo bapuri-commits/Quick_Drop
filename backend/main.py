@@ -79,22 +79,33 @@ def _decode_jwt(token: str) -> dict:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
-def _require_auth(
+def _extract_token(
     syops_token: str | None = None,
     authorization: str | None = None,
     token: str | None = None,
-) -> dict:
-    """JWT 검증 후 {"user_id": int, "username": str, "role": str} 반환."""
+) -> str:
+    """쿠키 / Bearer 헤더 / 쿼리 파라미터에서 JWT 원본을 추출."""
     raw = syops_token or token
     if not raw and authorization and authorization.startswith("Bearer "):
         raw = authorization[7:]
     if not raw:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    return raw
+
+
+def _require_auth(
+    syops_token: str | None = None,
+    authorization: str | None = None,
+    token: str | None = None,
+) -> dict:
+    """JWT 검증 후 {"user_id": int, "username": str, "role": str, "raw_token": str} 반환."""
+    raw = _extract_token(syops_token, authorization, token)
     payload = _decode_jwt(raw)
     return {
         "user_id": int(payload["sub"]),
         "username": payload.get("username", "unknown"),
         "role": payload.get("role", "user"),
+        "raw_token": raw,
     }
 
 
@@ -334,8 +345,11 @@ async def send_file(
         _delete_file(sender_uid, file_id)
         raise HTTPException(status_code=404, detail="File expired")
 
-    target_user = await _lookup_user(body.to_username, syops_token or "")
+    target_user = await _lookup_user(body.to_username, sender["raw_token"])
     target_uid = target_user["id"]
+
+    if _total_storage_used(target_uid) + meta["size"] > config.MAX_STORAGE_BYTES:
+        raise HTTPException(status_code=400, detail="Recipient storage full")
 
     src_path = _user_upload_dir(sender_uid) / meta["stored_name"]
     if not src_path.exists():

@@ -122,6 +122,9 @@ video.file-preview { object-fit: cover; }
 }
 .btn-dl { background: var(--accent); color: #fff; }
 .btn-dl:hover { background: var(--accent-hover); }
+.btn-gdrive { background: #34a853; color: #fff; }
+.btn-gdrive:hover { background: #2d8e47; }
+.btn-gdrive:disabled { background: #999; cursor: wait; }
 .btn-del { background: var(--surface); border: 1px solid var(--border) !important; color: var(--danger); }
 .btn-del:hover { background: var(--danger); color: #fff; }
 
@@ -735,6 +738,7 @@ function renderVault(items) {
       </div>
       <div class="file-actions">
         <button class="btn-dl" onclick="vaultDownload('${safePath}')" title="\uB2E4\uC6B4\uB85C\uB4DC">&#8595;</button>
+        <button class="btn-gdrive" onclick="vaultToGDrive('${safePath}')" title="Google Drive\uB85C \uB0B4\uBCF4\uB0B4\uAE30">&#9729;</button>
         <button class="btn-del" onclick="vaultDelete('${safePath}')" title="\uC0AD\uC81C">&#10005;</button>
       </div>
     </div>`;
@@ -748,6 +752,38 @@ function vaultDownload(path) {
   a.href = API + '/api/vault/download?path=' + encodeURIComponent(path);
   a.download = '';
   a.click();
+}
+
+async function vaultToGDrive(path) {
+  const name = path.split('/').pop();
+  const btn = event.target;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳';
+  try {
+    const r = await fetch(API + '/api/vault/gdrive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ path }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      alert(err.detail || 'Drive 업로드 실패');
+      return;
+    }
+    const data = await r.json();
+    btn.innerHTML = '✓';
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 2000);
+    if (data.drive_link && confirm(`"${name}" 업로드 완료!\nDrive에서 열까요?`)) {
+      window.open(data.drive_link, '_blank');
+    }
+  } catch {
+    alert('Drive 업로드 중 오류 발생');
+  } finally {
+    if (btn.innerHTML === '⏳') { btn.innerHTML = orig; }
+    btn.disabled = false;
+  }
 }
 
 async function vaultDelete(path) {

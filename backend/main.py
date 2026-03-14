@@ -31,6 +31,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 import config
+from gdrive import GDriveUploader
 
 ALLOWED_ORIGIN = os.getenv(
     "QUICKDROP_ALLOWED_ORIGIN", "https://drop.syworkspace.cloud"
@@ -517,6 +518,63 @@ async def vault_mkdir(path: str = Form(...), syops_token: str | None = Cookie(de
         raise HTTPException(status_code=409, detail="Already exists")
     target.mkdir(parents=True, exist_ok=True)
     return {"ok": True, "path": path}
+
+
+# ── Google Drive ──────────────────────────────────────
+
+_gdrive: GDriveUploader | None = None
+
+
+def _get_gdrive() -> GDriveUploader:
+    global _gdrive
+    if not config.GDRIVE_ENABLED:
+        raise HTTPException(status_code=503, detail="Google Drive not configured")
+    if _gdrive is None:
+        _gdrive = GDriveUploader(config.GDRIVE_SERVICE_ACCOUNT)
+    return _gdrive
+
+
+@app.get("/api/gdrive/status")
+async def gdrive_status():
+    return {"enabled": config.GDRIVE_ENABLED}
+
+
+class GDriveUploadRequest(BaseModel):
+    path: str
+
+
+@app.post("/api/vault/gdrive")
+async def vault_to_gdrive(
+    body: GDriveUploadRequest,
+    syops_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    """Vault 파일을 Google Drive로 업로드."""
+    user = _require_auth(syops_token, authorization)
+    uid = user["user_id"]
+    target = _safe_vault_path(uid, body.path)
+
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    uploader = _get_gdrive()
+    subfolder_id = uploader.find_or_create_folder(
+        "QuickDrop", config.GDRIVE_ROOT_FOLDER_ID
+    )
+
+    vault_rel = body.path.strip("/")
+    parts = vault_rel.split("/")
+    if len(parts) > 1:
+        for folder_name in parts[:-1]:
+            subfolder_id = uploader.find_or_create_folder(folder_name, subfolder_id)
+
+    result = uploader.upload_file(str(target), subfolder_id)
+    return {
+        "ok": True,
+        "drive_link": result.get("webViewLink"),
+        "drive_file_id": result.get("id"),
+        "name": result.get("name"),
+    }
 
 
 # ── Clipboard ─────────────────────────────────────────

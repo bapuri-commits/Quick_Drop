@@ -10,12 +10,12 @@ services:
       - ${DATA_DIR:-../data}/drop:/data/drop
       - ${DATA_DIR:-../data}/vault:/data/vault
       - ${DATA_DIR:-../data}/clipboard:/data/clipboard
-      - ${GDRIVE_SERVICE_ACCOUNT_PATH:-/opt/envs/gdrive-service-account.json}:/secrets/gdrive.json:ro
+      - /opt/envs/gdrive-token.json:/secrets/gdrive-token.json
     environment:
       QUICKDROP_UPLOAD_DIR: /data/drop
       QUICKDROP_VAULT_DIR: /data/vault
       QUICKDROP_CLIPBOARD_DIR: /data/clipboard
-      GDRIVE_SERVICE_ACCOUNT_PATH: /secrets/gdrive.json
+      GDRIVE_TOKEN_PATH: /secrets/gdrive-token.json
     env_file:
       - .env
     extra_hosts:

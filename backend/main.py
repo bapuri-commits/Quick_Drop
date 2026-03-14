@@ -530,12 +530,16 @@ def _get_gdrive() -> GDriveUploader:
     if not config.GDRIVE_ENABLED:
         raise HTTPException(status_code=503, detail="Google Drive not configured")
     if _gdrive is None:
-        _gdrive = GDriveUploader(config.GDRIVE_SERVICE_ACCOUNT)
+        _gdrive = GDriveUploader(config.GDRIVE_TOKEN_PATH)
     return _gdrive
 
 
 @app.get("/api/gdrive/status")
-async def gdrive_status():
+async def gdrive_status(
+    syops_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    _require_auth(syops_token, authorization)
     return {"enabled": config.GDRIVE_ENABLED}
 
 

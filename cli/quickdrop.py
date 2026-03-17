@@ -9,10 +9,9 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
-from http.cookiejar import MozillaCookieJar
-import urllib.request
 
 CONFIG_PATH = Path.home() / ".quickdrop.json"
+SYOPS_URL = os.getenv("SYOPS_URL", "https://syworkspace.cloud")
 
 
 def load_config():
@@ -27,7 +26,7 @@ def save_config(cfg):
 
 def api(cfg, method, path, data=None, headers=None, stream=False):
     url = urljoin(cfg["server"].rstrip("/") + "/", path.lstrip("/"))
-    hdrs = {"Cookie": f"session={cfg.get('token', '')}"}
+    hdrs = {"Authorization": f"Bearer {cfg.get('token', '')}"}
     if headers:
         hdrs.update(headers)
 
@@ -44,6 +43,9 @@ def api(cfg, method, path, data=None, headers=None, stream=False):
     except HTTPError as e:
         if e.code == 401:
             print("인증 만료. quickdrop login 을 다시 실행하세요.")
+            sys.exit(1)
+        if e.code == 403:
+            print("QuickDrop 접근 권한이 없습니다. 관리자에게 문의하세요.")
             sys.exit(1)
         body = e.read().decode("utf-8", errors="replace")
         print(f"오류 ({e.code}): {body}")
@@ -82,13 +84,15 @@ def format_size(n):
 def cmd_login(args):
     server = args.server.rstrip("/")
     import getpass
+    username = input("아이디: ")
     pw = getpass.getpass("비밀번호: ")
 
-    body, ct = multipart_encode({"password": pw}, [])
+    login_url = f"{SYOPS_URL}/api/auth/login"
+    body = json.dumps({"username": username, "password": pw}).encode("utf-8")
     req = Request(
-        f"{server}/api/auth",
+        login_url,
         data=body,
-        headers={"Content-Type": ct},
+        headers={"Content-Type": "application/json"},
         method="POST",
     )
     try:
@@ -96,12 +100,14 @@ def cmd_login(args):
         data = json.loads(resp.read().decode("utf-8"))
         cfg = load_config()
         cfg["server"] = server
-        cfg["token"] = data["token"]
+        cfg["token"] = data["access_token"]
         save_config(cfg)
         print(f"로그인 성공! 서버: {server}")
     except HTTPError as e:
-        if e.code == 403:
-            print("비밀번호가 틀렸습니다.")
+        if e.code == 401:
+            print("아이디 또는 비밀번호가 올바르지 않습니다.")
+        elif e.code == 403:
+            print("계정이 비활성화되어 있습니다.")
         else:
             print(f"로그인 실패 ({e.code})")
         sys.exit(1)

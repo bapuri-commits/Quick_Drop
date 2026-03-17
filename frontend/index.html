@@ -456,12 +456,27 @@ async function checkAuth() {
     const r = await fetch(API + '/api/auth/check', { credentials: 'include' });
     if (r.ok) {
       const data = await r.json();
+      if (!data.has_access) {
+        showAccessDenied(data.username);
+        return;
+      }
       document.getElementById('user-display').textContent = data.username ? `(${data.username})` : '';
       showMain();
       return;
     }
   } catch {}
   redirectToLogin();
+}
+
+function showAccessDenied(username) {
+  document.getElementById('login-view').style.display = 'flex';
+  document.getElementById('login-view').innerHTML = `
+    <h1>QuickDrop</h1>
+    <p>\uAC1C\uC778 \uD30C\uC77C \uD074\uB77C\uC6B0\uB4DC</p>
+    <p style="color:var(--danger);margin:16px 0;">${username || ''}\uB2D8\uC740 QuickDrop \uC811\uADFC \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.</p>
+    <p style="color:var(--text2);font-size:14px;">\uAD00\uB9AC\uC790\uC5D0\uAC8C \uAD8C\uD55C\uC744 \uC694\uCCAD\uD558\uC138\uC694.</p>
+  `;
+  document.getElementById('main-view').style.display = 'none';
 }
 
 function redirectToLogin() {

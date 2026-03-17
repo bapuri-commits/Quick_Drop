@@ -99,13 +99,17 @@ def _require_auth(
     authorization: str | None = None,
     token: str | None = None,
 ) -> dict:
-    """JWT 검증 후 {"user_id": int, "username": str, "role": str, "raw_token": str} 반환."""
+    """JWT 검증 + QuickDrop 서비스 권한 체크. {"user_id", "username", "role", "raw_token"} 반환."""
     raw = _extract_token(syops_token, authorization, token)
     payload = _decode_jwt(raw)
+    role = payload.get("role", "user")
+    services = payload.get("services", [])
+    if role != "admin" and "quickdrop" not in services:
+        raise HTTPException(status_code=403, detail="QuickDrop access denied")
     return {
         "user_id": int(payload["sub"]),
         "username": payload.get("username", "unknown"),
-        "role": payload.get("role", "user"),
+        "role": role,
         "raw_token": raw,
     }
 
@@ -194,10 +198,19 @@ def _total_storage_used(user_id: int) -> int:
 
 @app.get("/api/auth/check")
 async def auth_check(syops_token: str | None = Cookie(default=None)):
+    """JWT 인증만 확인 (서비스 권한은 체크하지 않음). 권한 여부는 has_access로 반환."""
     if not syops_token:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    info = _require_auth(syops_token=syops_token)
-    return {"authenticated": True, "username": info["username"]}
+    raw = _extract_token(syops_token=syops_token)
+    payload = _decode_jwt(raw)
+    role = payload.get("role", "user")
+    services = payload.get("services", [])
+    has_access = role == "admin" or "quickdrop" in services
+    return {
+        "authenticated": True,
+        "username": payload.get("username", "unknown"),
+        "has_access": has_access,
+    }
 
 
 # ── Files ─────────────────────────────────────────────
